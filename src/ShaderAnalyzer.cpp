@@ -181,9 +181,26 @@ namespace ShaderToggler
 			std::string lowerDisasm = disasm;
 			std::transform(lowerDisasm.begin(), lowerDisasm.end(), lowerDisasm.begin(), [](unsigned char c) { return std::tolower(c); });
 
-			// Heuristic 1: Outline / Edge Detection
-			if(shaderType == 0) // Pixel shader
+			// Heuristic 1: Outline & Selection Highlights (Pixel Shaders)
+			if(shaderType == 0)
 			{
+				// Check for explicit outline/selection metadata & identifiers in constant buffer reflections
+				bool hasOutlineKeyword = lowerDisasm.find("selection") != std::string::npos ||
+				                         lowerDisasm.find("highlight") != std::string::npos ||
+				                         lowerDisasm.find("outline") != std::string::npos ||
+				                         lowerDisasm.find("edge") != std::string::npos ||
+				                         lowerDisasm.find("overlaycol") != std::string::npos ||
+				                         lowerDisasm.find("alphatestvalue") != std::string::npos;
+
+				// Check for Multiple Render Target (MRT) outline output (e.g. Assassin's Creed Black Flag style)
+				bool hasMRT = lowerDisasm.find("dcl_output o1") != std::string::npos;
+				bool hasAlphaModulation = lowerDisasm.find("o0.w") != std::string::npos || lowerDisasm.find("o1.w") != std::string::npos;
+
+				// Check for Anime / Cel-shade inverse multiply blend (e.g. DBXV2 style: r0 = (1 - r0) * r1 + r0)
+				bool hasInverseBlend = (lowerDisasm.find("1.000000") != std::string::npos || lowerDisasm.find("l(1.0") != std::string::npos) &&
+				                       lowerDisasm.find("mad ") != std::string::npos &&
+				                       (lowerDisasm.find("t1") != std::string::npos || lowerDisasm.find("t2") != std::string::npos);
+
 				// Count texture samples per texture register (t0, t1, t2...)
 				std::map<std::string, int> textureSamples;
 				std::istringstream stream(lowerDisasm);
@@ -200,7 +217,6 @@ namespace ShaderToggler
 					if(line.find("sample") != std::string::npos)
 					{
 						totalSamples++;
-						// Find texture register name e.g. t0, t1, t2
 						size_t tPos = line.find(" t");
 						if(tPos == std::string::npos) tPos = line.find(", t");
 						if(tPos != std::string::npos)
@@ -225,11 +241,21 @@ namespace ShaderToggler
 					}
 				}
 
-				// Edge detection filters sample the same texture 3-8 times and take differences
-				if((maxSingleTextureSamples >= 4 && (hasSub && (hasAbs || hasDot || hasMinMax))) || hasDeriv)
+				// Screen-space Edge detection: multi-tap texture difference OR MRT selection/outline OR inverse blend
+				if(hasOutlineKeyword && (hasAlphaModulation || hasMRT || hasInverseBlend))
 				{
 					result.categoryFlags |= Category_OutlineEdge;
-					result.categorySummary = "Outline / Edge Filter";
+					result.categorySummary = "Selection / Outline Highlight";
+				}
+				else if((maxSingleTextureSamples >= 4 && (hasSub && (hasAbs || hasDot || hasMinMax))) || hasDeriv)
+				{
+					result.categoryFlags |= Category_OutlineEdge;
+					result.categorySummary = "Screen-Space Edge Filter";
+				}
+				else if(hasInverseBlend && totalSamples >= 2)
+				{
+					result.categoryFlags |= Category_OutlineEdge;
+					result.categorySummary = "Cel-Shade Line / Edge Blend";
 				}
 				else if(maxSingleTextureSamples >= 5 && !hasAbs && (lowerDisasm.find("add ") != std::string::npos || lowerDisasm.find("mad ") != std::string::npos))
 				{
@@ -237,46 +263,86 @@ namespace ShaderToggler
 					result.categorySummary = "Bloom / Blur Filter";
 				}
 
-				// Heuristic 2: Vignette / Lens Falloff
-				if((lowerDisasm.find("0.500000") != std::string::npos || lowerDisasm.find("2.000000") != std::string::npos) &&
-				   (lowerDisasm.find("dp2 ") != std::string::npos || lowerDisasm.find("sqrt ") != std::string::npos) &&
-				   (lowerDisasm.find("mul o0") != std::string::npos || lowerDisasm.find("mad o0") != std::string::npos))
+				// Heuristic 2: Vignette & Screen Borders
+				bool hasVignetteKeyword = lowerDisasm.find("vignette") != std::string::npos ||
+				                          lowerDisasm.find("anglepower") != std::string::npos ||
+				                          lowerDisasm.find("textureoverlay") != std::string::npos ||
+				                          lowerDisasm.find("black borders") != std::string::npos;
+
+				bool hasVignetteMath = (lowerDisasm.find("0.500000") != std::string::npos || lowerDisasm.find("2.000000") != std::string::npos) &&
+				                       (lowerDisasm.find("dp2 ") != std::string::npos || lowerDisasm.find("sqrt ") != std::string::npos) &&
+				                       (lowerDisasm.find("mul o0") != std::string::npos || lowerDisasm.find("mad o0") != std::string::npos);
+
+				if(hasVignetteKeyword || hasVignetteMath)
 				{
 					result.categoryFlags |= Category_Vignette;
-					if(result.categorySummary.empty()) result.categorySummary = "Vignette / Lens Falloff";
+					if(result.categorySummary.empty()) result.categorySummary = "Vignette / Screen Border";
 					else result.categorySummary += ", Vignette";
 				}
 
-				// Heuristic 3: Fog / Atmospheric Depth
-				if((lowerDisasm.find("exp ") != std::string::npos || lowerDisasm.find("exp2 ") != std::string::npos) &&
-				   (lowerDisasm.find("lerp ") != std::string::npos || lowerDisasm.find("mad ") != std::string::npos || lowerDisasm.find("add ") != std::string::npos))
+				// Heuristic 3: Fog & Atmospheric Depth
+				bool hasFogKeyword = lowerDisasm.find("fog") != std::string::npos ||
+				                     lowerDisasm.find("haze") != std::string::npos ||
+				                     lowerDisasm.find("sunbackcolor") != std::string::npos ||
+				                     lowerDisasm.find("atmospheric") != std::string::npos;
+
+				bool hasFogMath = (lowerDisasm.find("exp ") != std::string::npos || lowerDisasm.find("exp2 ") != std::string::npos) &&
+				                  (lowerDisasm.find("lerp ") != std::string::npos || lowerDisasm.find("mad ") != std::string::npos || lowerDisasm.find("add ") != std::string::npos);
+
+				if(hasFogKeyword || hasFogMath)
 				{
 					result.categoryFlags |= Category_FogAtmospheric;
-					if(result.categorySummary.empty()) result.categorySummary = "Fog / Depth Effect";
+					if(result.categorySummary.empty()) result.categorySummary = "Fog / Atmospheric Depth";
 					else result.categorySummary += ", Fog";
 				}
 
-				// Heuristic 5: UI / HUD
-				if(lowerDisasm.find("discard_nz") != std::string::npos || lowerDisasm.find("discard_z") != std::string::npos)
+				// Heuristic 4: Bloom, Bokeh, Flares & Blur
+				bool hasBlurKeyword = lowerDisasm.find("bokeh") != std::string::npos ||
+				                      lowerDisasm.find("bloom") != std::string::npos ||
+				                      lowerDisasm.find("lensflare") != std::string::npos ||
+				                      lowerDisasm.find("flare") != std::string::npos ||
+				                      lowerDisasm.find("glare") != std::string::npos ||
+				                      lowerDisasm.find("sunglobe") != std::string::npos ||
+				                      lowerDisasm.find("motionblur") != std::string::npos ||
+				                      lowerDisasm.find("radialblur") != std::string::npos;
+
+				if(hasBlurKeyword && (result.categoryFlags & Category_BloomBlur) == 0)
+				{
+					result.categoryFlags |= Category_BloomBlur;
+					if(result.categorySummary.empty()) result.categorySummary = "Bloom / Flare / Bokeh";
+					else result.categorySummary += ", Bloom";
+				}
+
+				// Heuristic 5: UI, HUD & Overlays
+				bool hasUIKeyword = lowerDisasm.find("minimap") != std::string::npos ||
+				                    lowerDisasm.find("hud") != std::string::npos ||
+				                    lowerDisasm.find("gui") != std::string::npos ||
+				                    lowerDisasm.find("font") != std::string::npos ||
+				                    lowerDisasm.find("crosshair") != std::string::npos;
+
+				if(hasUIKeyword || lowerDisasm.find("discard_nz") != std::string::npos || lowerDisasm.find("discard_z") != std::string::npos)
 				{
 					result.categoryFlags |= Category_UI_HUD;
-					if(result.categorySummary.empty()) result.categorySummary = "UI / Alpha Mask";
+					if(result.categorySummary.empty()) result.categorySummary = "UI / HUD Overlay";
 					else result.categorySummary += ", UI";
 				}
 			}
 			else if(shaderType == 1) // Vertex shader
 			{
 				// Inverted hull outline check in vertex shader: normal multiplied by width and added to position
-				if(lowerDisasm.find("normal") != std::string::npos &&
-				   lowerDisasm.find("mul ") != std::string::npos &&
-				   lowerDisasm.find("add ") != std::string::npos)
+				bool hasNormalKeyword = lowerDisasm.find("normal") != std::string::npos;
+				bool hasHullMath = (lowerDisasm.find("mul ") != std::string::npos || lowerDisasm.find("mad ") != std::string::npos) &&
+				                   lowerDisasm.find("add ") != std::string::npos;
+
+				if(hasNormalKeyword && hasHullMath)
 				{
 					result.categoryFlags |= Category_OutlineEdge;
 					result.categorySummary = "Inverted-Hull Outline";
 				}
 
 				// UI orthographic vertex check
-				if(lowerDisasm.find("0.000000") != std::string::npos && lowerDisasm.find("1.000000") != std::string::npos)
+				if(lowerDisasm.find("0.000000") != std::string::npos && lowerDisasm.find("1.000000") != std::string::npos &&
+				   (lowerDisasm.find("gui") != std::string::npos || lowerDisasm.find("ui") != std::string::npos || lowerDisasm.find("hud") != std::string::npos))
 				{
 					result.categoryFlags |= Category_UI_HUD;
 					if(result.categorySummary.empty()) result.categorySummary = "UI / 2D Transform";
