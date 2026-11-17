@@ -16,6 +16,19 @@ namespace ShaderToggler
 		ID3DBlob** ppDisassembly
 	);
 
+	static bool safeD3DDisassemble(PFN_D3DDisassemble pfn, const void* data, size_t size, ID3DBlob** ppBlob)
+	{
+		__try
+		{
+			HRESULT hr = pfn(data, size, 0, nullptr, ppBlob);
+			return SUCCEEDED(hr) && (*ppBlob != nullptr);
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
+
 	ShaderAnalyzer::ShaderAnalyzer()
 	{
 	}
@@ -126,8 +139,7 @@ namespace ShaderToggler
 
 		ID3DBlob* pDisasmBlob = nullptr;
 		PFN_D3DDisassemble pfn = reinterpret_cast<PFN_D3DDisassemble>(_pfnD3DDisassemble);
-		HRESULT hr = pfn(bytecodeCopy.data(), bytecodeCopy.size(), 0, nullptr, &pDisasmBlob);
-		if(SUCCEEDED(hr) && pDisasmBlob != nullptr)
+		if(safeD3DDisassemble(pfn, bytecodeCopy.data(), bytecodeCopy.size(), &pDisasmBlob))
 		{
 			std::string disasm(static_cast<const char*>(pDisasmBlob->GetBufferPointer()), pDisasmBlob->GetBufferSize());
 			pDisasmBlob->Release();

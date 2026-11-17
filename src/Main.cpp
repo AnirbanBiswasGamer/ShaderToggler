@@ -461,23 +461,43 @@ static void onInitPipeline(device *device, pipeline_layout, uint32_t subobjectCo
 			continue;
 		}
 
-		const uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
-		const auto shaderDesc = *static_cast<const shader_desc *>(subobjects[i].data);
-		if(shaderHash != 0 && shaderDesc.code != nullptr && shaderDesc.code_size > 0)
-		{
-			ShaderAnalyzer::getInstance().storeBytecode(shaderHash, shaderDesc.code, shaderDesc.code_size);
-		}
-
 		switch (subobjects[i].type)
 		{
 			case pipeline_subobject_type::vertex_shader:
+			{
+				const auto& shaderDesc = *static_cast<const shader_desc *>(subobjects[i].data);
+				const uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				if(shaderHash != 0 && shaderDesc.code != nullptr && shaderDesc.code_size > 0)
+				{
+					ShaderAnalyzer::getInstance().storeBytecode(shaderHash, shaderDesc.code, shaderDesc.code_size);
+				}
 				g_vertexShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 				break;
+			}
 			case pipeline_subobject_type::pixel_shader:
+			{
+				const auto& shaderDesc = *static_cast<const shader_desc *>(subobjects[i].data);
+				const uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				if(shaderHash != 0 && shaderDesc.code != nullptr && shaderDesc.code_size > 0)
+				{
+					ShaderAnalyzer::getInstance().storeBytecode(shaderHash, shaderDesc.code, shaderDesc.code_size);
+				}
 				g_pixelShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 				break;
+			}
 			case pipeline_subobject_type::compute_shader:
+			{
+				const auto& shaderDesc = *static_cast<const shader_desc *>(subobjects[i].data);
+				const uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				if(shaderHash != 0 && shaderDesc.code != nullptr && shaderDesc.code_size > 0)
+				{
+					ShaderAnalyzer::getInstance().storeBytecode(shaderHash, shaderDesc.code, shaderDesc.code_size);
+				}
 				g_computeShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
+				break;
+			}
+			default:
+				// Non-shader subobjects (rasterizer, blend, depth-stencil, input layout, etc.)
 				break;
 		}
 	}
