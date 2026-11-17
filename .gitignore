@@ -8,6 +8,7 @@
 *.sln.docstates
 [Aa]dditional[Hh]elper[Ff]iles/
 
+dist/
 Deployment/
 
 # User-specific files (MonoDevelop/Xamarin Studio)

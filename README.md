@@ -1,53 +1,76 @@
 # ShaderToggler
-Reshade 5.1+ addin to toggle game shaders on/off in groups based on a key press. It allows you to configure these groups from within the addin as well. 
-This addon is meant to toggle a game's shaders on/off, not reshade effects. 
+Reshade 5.1+ add-on to toggle game shaders on/off in groups based on a key press. It allows you to configure these groups from within the add-on as well. 
+This addon is meant to toggle a game's shaders on/off, not ReShade effects. 
 
-It's mainly for 64bit reshade. There's a 32bit version in the releases, but it's the original old version, newer versions are 64 bit only. 
+Available for **both 64-bit (x64) and 32-bit (x86)** games with full feature parity.
+
+---
 
 ## How to use
-Place the `ShaderToggler.addon64` in the same folder as where the game exe is located. This is in most cases the same folder as where the Reshade 5.1+ dll
-is located. Only for games which use Vulkan, the Reshade dll is likely elsewhere. For Unreal Engine powered games there might be two
-game exe's: one in the game's installation folder, and one in a folder deeper into that folder, e.g. 
-`GameName\Binaries\Win64\GameName-Win64-Shipping.exe`; the shader toggler addon has to be in that second folder, in our example:
-`GameName\Binaries\Win64`. Reshade has to be placed in that folder as well.
 
-Be sure to use the Reshade version which supports Addons (so the unsigned version). When you start your game, the `Addons` tab in 
-the Reshade gui should show the Shader Toggler information and controls. 
+### 64-bit Games
+Place `ShaderToggler.addon64` into the directory where the 64-bit game executable is located. In most cases, this is where the ReShade 5.1+ 64-bit DLL (`dxgi.dll`, `d3d11.dll`, etc.) is installed.
 
-To obtain the unsigned Reshade version, go to <https://reshade.me> and click on *Download*, then on the grey button to download the ReShade version with Add-on support. 
+### 32-bit Games
+Place `ShaderToggler.addon32` (or `ShaderToggler.addon`) into the directory where the 32-bit game executable is located. ReShade loads both `.addon32` and `.addon` for 32-bit processes. Both files are provided in the release.
 
-To create a toggle for a set of shaders, open the reshade gui and go to the addon's tab -> Shader Toggler area. Then click 
-the `New` button to create a new *Toggle group*. By default the new toggle group has as name `Default` and as toggle key 
-`Caps Lock`. To change these, click the `Edit` button of the Toggle Group. You can then change the name of the toggle group
-and also the keyboard shortcut. The keyboard shortcut nor the name have to be unique. The keyboard shortcut can be 
-any key on your keyboard, optionally in combination of using `Alt`, `Control`, and `Shift`. 
+> **Note:** Be sure to use the ReShade version with Add-on support (the unsigned version from <https://reshade.me>). When you start your game, open the ReShade overlay (`Home` key by default) and check the `Add-ons` tab to see ShaderToggler's controls and settings.
 
-A toggle group needs shaders assigned to it, that's done with marking shaders below.
+---
 
-## Marking Shaders
-To successfully be able to mark a set of shaders to toggle, be sure the elements you want to toggle, so the elements
-using the shaders, are visible, e.g. a menu or a hud or a certain effect. After you've made sure the elements to toggle are
-visible, click the `Change Shaders` button of the toggle group. This will start the 'Shader hunting' phase for the particular 
-toggle group. 
+## Creating & Managing Toggle Groups
+1. Open the ReShade overlay and go to the `Add-ons` tab -> `Shader Toggler`.
+2. Click **New** to create a toggle group. By default, its name is `Default` and toggle key is `Caps Lock`.
+3. Click **Edit** to configure:
+   - **Name:** Set a custom description for the group.
+   - **Key shortcut:** Click the box and press any key combo (including `Ctrl`, `Alt`, and `Shift`).
+   - **Is active at startup:** Check this box if you want the group to automatically be active when the game launches.
+   - **Invert selection:** When checked, the group will hide all *other* shaders instead of the marked ones.
+4. Each group can also be enabled or disabled directly by clicking the `[x]` checkbox next to its name.
 
-You should see the shader overlay in the top left corner with the information you need. By default it waits a certain amount
-of frames (which you can configure in the reshade overlay) to see which shaders are currently active. This is to avoid having
-to walk through potentially thousands of shaders which aren't currently used. 
+### Master Toggle Key
+In the settings, you can assign a **Master Toggle Key** or click **Toggle All Groups Now**:
+- Pressing the master key will temporarily turn off all active groups and remember their states.
+- Pressing it again will restore only the groups that were previously active.
 
-After the frames have been collected, it has enough information to allow you to browse the shaders. 
+---
 
-To walk the available pixel shaders, use the `Numpad 1` and `Numpad 2` keys. If an element disappears, the shader that's 
-currently 'active' is rendering these elements, so if you want to hide these elements, press `Numpad 3`. The shader is then 
-marked, and part of the toggle group. Press `Numpad 3` again to remove it from the group.
+## Marking Shaders (Hunting Mode)
+1. Ensure the element you want to toggle (e.g. HUD, UI, shadows, fog) is visible on screen.
+2. Click **Change Shaders** on the toggle group you wish to edit. The hunting overlay will appear in the top-left corner.
+3. The add-on collects active shaders over a configurable number of frames (default 250) so you only browse shaders actually in use.
+4. Use the hunting keys to navigate and mark shaders:
+   - **Holding down** the previous/next keys will scroll continuously through shaders.
+   - Hold **Ctrl** while pressing previous/next to quickly navigate through *only* the shaders already marked in the current group.
+5. While stepping through shaders, the currently active shader will temporarily turn off in the scene so you can see what it renders.
+6. Once you find the shader rendering the target element, press the **Mark/Unmark** key to add it to the group.
+7. Click **Done** when finished, then click **Save all Toggle Groups** to save your changes to the INI file.
 
-To walk the available vertex shaders, instead use the `Numpad 4` and `Numpad 5` keys. To mark a vertex shader to be part of the toggle group, press `Numpad 6`.
-To walk the available compute shaders, instead use the `Numpad 7` and `Numpad 8` keys. To mark a compute shader to be part of the toggle group, press `Numpad 9`.
+### Configurable Hunting Hotkeys (TKL / Laptop Support)
+Under the **Hunting keyboard shortcuts** header in the settings, all 9 hunting actions can be bound to any key on your keyboard:
+- **Pixel Shaders:** Previous (default `Numpad 1`), Next (default `Numpad 2`), Mark/Unmark (default `Numpad 3`)
+- **Vertex Shaders:** Previous (default `Numpad 4`), Next (default `Numpad 5`), Mark/Unmark (default `Numpad 6`)
+- **Compute Shaders:** Previous (default `Numpad 7`), Next (default `Numpad 8`), Mark/Unmark (default `Numpad 9`)
+- Click **Reset Hunting Keys to Defaults** at any time to restore the default Numpad layout.
 
-To walk all shaders you already marked in the current group, you can hold down `Ctrl` and press the Numpad keys for the shader type (`Numpad 1` and `Numpad 2` for pixel shaders, `Numpad 4` and `Numpad 5` for vertex shaders and `Numpad 7` and `Numpad 8` for compute shaders) to quickly move back/forth through the shaders in a group, e.g. when you made a mistake and you want to unmark a shader.
+---
 
-To test your current group, press the toggle key you assigned to the group. When you're done, click the 'Done' button in the 
-reshade overlay for the particular toggle group. 
+## Configuration Profiles
+- By default, settings are saved to `ShaderToggler.ini` in the game executable's folder.
+- **Game-Specific Profiles:** ShaderToggler also supports per-game INI files (`ShaderToggler.<ExecutableName>.ini`).
+- The active profile is displayed in the UI, and a switch button allows toggling between the default and game-specific profile.
 
-To re-use this information the next time you run the game, click the Save toggle group button. This will write an ini file 
-(`ShaderToggler.ini`) with the information to create the set of shaders to toggle next time you start the game. This file is
-located in the same folder as `ShaderToggler.addon64`.
+---
+
+## Changelog
+
+### v1.3.0
+- **x86 (32-bit) Full Modern Parity:** Complete 32-bit build (`ShaderToggler.addon32` / `ShaderToggler.addon`) supporting all modern features, Large Address Aware (`/LARGEADDRESSAWARE`), and optimized for DirectX 9, DirectX 11, OpenGL, and Vulkan.
+- **Configurable Hunting Keys (#41, #38, #20, #9):** Added full UI remapping for all 9 shader hunting actions, allowing full usage on laptops, 60%, 75%, and Tenkeyless (TKL) keyboards without a physical Numpad.
+- **Continuous Key Repeat (#22):** Holding down Next or Previous shader keys now scrolls smoothly through shaders with autorepeat.
+- **Master Toggle Shortcut (#43):** Added a global master hotkey and button to toggle all groups off or restore their previous active states with one key press.
+- **Per-Game INI Profiles (#3):** Support for `ShaderToggler.<GameExeName>.ini` with seamless in-game profile switching.
+- **Inverted Selection & UI Checkboxes (#23):** Added option to invert group selection and direct UI checkboxes to toggle groups with the mouse.
+- **Compute Dispatch Event:** Registered `addon_event::dispatch` to ensure compute shaders are intercepted during dispatch.
+- **Pipeline Unbind Fix:** Fixed pipeline state tracking when shaders are unbound (`handle == 0`) in D3D9/D3D11 to prevent false shader blocking.
+- **Performance & Thread-Safety:** Replaced exclusive write locks with reader shared locks (`std::shared_lock`) on draw call lookups with fast-path zero-handle handling.
