@@ -739,31 +739,46 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 			{
 				ImGui::SameLine();
 				uint32_t flags = ShaderAnalyzer::getInstance().getCategoryFlags(currentHash, toDisplay.getShaderType());
-				char patchBtnLabel[64];
-				PatchStrategy strategyToUse = PatchStrategy::AutoDetect;
 
 				if(toDisplay.getShaderType() == 1) // Vertex shader
 				{
+					char patchBtnLabel[64];
 					sprintf_s(patchBtnLabel, "Collapse Inverted Hull##%s", shaderType);
-					strategyToUse = PatchStrategy::InvertedHull_VertexNormal;
-				}
-				else if((flags & Category_BloomBlur) != 0 || (flags & Category_FogAtmospheric) != 0 || (flags & Category_Vignette) != 0)
-				{
-					sprintf_s(patchBtnLabel, "Bypass Blur (Keep Scene)##%s", shaderType);
-					strategyToUse = PatchStrategy::Blur_PassThrough;
+					if(ImGui::SmallButton(patchBtnLabel))
+					{
+						std::string msg;
+						ShaderPatcher::getInstance().autoPatchShader(currentHash, toDisplay.getShaderType(), PatchStrategy::InvertedHull_VertexNormal, currentBasePath, msg);
+						s_lastPatchedHash = currentHash;
+						s_lastPatchMsg = msg;
+					}
 				}
 				else
 				{
-					sprintf_s(patchBtnLabel, "Auto-Patch Cel-Outline##%s", shaderType);
-					strategyToUse = PatchStrategy::CelOutline_MadBlend;
-				}
+					// For pixel shaders: Always offer instruction-level Cel-Outline neutralization (keeps water and scene!)
+					char outlineBtnLabel[64];
+					sprintf_s(outlineBtnLabel, "Auto-Patch Cel-Outline (Keep Water)##%s", shaderType);
+					if(ImGui::SmallButton(outlineBtnLabel))
+					{
+						std::string msg;
+						ShaderPatcher::getInstance().autoPatchShader(currentHash, toDisplay.getShaderType(), PatchStrategy::CelOutline_MadBlend, currentBasePath, msg);
+						s_lastPatchedHash = currentHash;
+						s_lastPatchMsg = msg;
+					}
 
-				if(ImGui::SmallButton(patchBtnLabel))
-				{
-					std::string msg;
-					ShaderPatcher::getInstance().autoPatchShader(currentHash, toDisplay.getShaderType(), strategyToUse, currentBasePath, msg);
-					s_lastPatchedHash = currentHash;
-					s_lastPatchMsg = msg;
+					// If also detected with bloom/fog/vignette keywords, offer secondary fullscreen bypass
+					if((flags & Category_BloomBlur) != 0 || (flags & Category_FogAtmospheric) != 0 || (flags & Category_Vignette) != 0)
+					{
+						ImGui::SameLine();
+						char blurBtnLabel[64];
+						sprintf_s(blurBtnLabel, "Bypass Blur Pass##%s", shaderType);
+						if(ImGui::SmallButton(blurBtnLabel))
+						{
+							std::string msg;
+							ShaderPatcher::getInstance().autoPatchShader(currentHash, toDisplay.getShaderType(), PatchStrategy::Blur_PassThrough, currentBasePath, msg);
+							s_lastPatchedHash = currentHash;
+							s_lastPatchMsg = msg;
+						}
+					}
 				}
 			}
 

@@ -344,13 +344,20 @@ namespace ShaderToggler
 			{
 				strategy = PatchStrategy::InvertedHull_VertexNormal;
 			}
+			else if((flags & Category_OutlineEdge) != 0)
+			{
+				if(disasm.find("dcl_output o1") != std::string::npos)
+				{
+					strategy = PatchStrategy::MRT_ZeroTargetO1;
+				}
+				else
+				{
+					strategy = PatchStrategy::CelOutline_MadBlend;
+				}
+			}
 			else if((flags & Category_BloomBlur) != 0 || (flags & Category_FogAtmospheric) != 0 || (flags & Category_Vignette) != 0)
 			{
 				strategy = PatchStrategy::Blur_PassThrough;
-			}
-			else if(disasm.find("dcl_output o1") != std::string::npos)
-			{
-				strategy = PatchStrategy::MRT_ZeroTargetO1;
 			}
 			else
 			{
