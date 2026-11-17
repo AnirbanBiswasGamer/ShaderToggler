@@ -177,15 +177,23 @@ namespace ShaderToggler
 		}
 		else
 		{
-			auto it = std::find(_filteredHuntedShaderHashes.begin(), _filteredHuntedShaderHashes.end(), _activeHuntedShaderHash);
-			if(it != _filteredHuntedShaderHashes.end())
+			if(_activeHuntedShaderHash != 0)
 			{
-				_activeHuntedShaderIndex = static_cast<int>(std::distance(_filteredHuntedShaderHashes.begin(), it));
+				auto it = std::find(_filteredHuntedShaderHashes.begin(), _filteredHuntedShaderHashes.end(), _activeHuntedShaderHash);
+				if(it != _filteredHuntedShaderHashes.end())
+				{
+					_activeHuntedShaderIndex = static_cast<int>(std::distance(_filteredHuntedShaderHashes.begin(), it));
+				}
+				else
+				{
+					_activeHuntedShaderIndex = -1;
+					_activeHuntedShaderHash = 0;
+				}
 			}
 			else
 			{
-				_activeHuntedShaderIndex = 0;
-				_activeHuntedShaderHash = _filteredHuntedShaderHashes[0];
+				_activeHuntedShaderIndex = -1;
+				_activeHuntedShaderHash = 0;
 			}
 		}
 	}
@@ -221,8 +229,9 @@ namespace ShaderToggler
 			}
 
 			const int total = static_cast<int>(_filteredHuntedShaderHashes.size());
-			int index = (_activeHuntedShaderIndex + 1) % total;
-			while(index != _activeHuntedShaderIndex)
+			int startIdx = (_activeHuntedShaderIndex < 0) ? -1 : _activeHuntedShaderIndex;
+			int index = (startIdx + 1 + total) % total;
+			while(index != startIdx)
 			{
 				uint32_t hash = _filteredHuntedShaderHashes[index];
 				if(_markedShaderHashes.count(hash) == 1)
@@ -232,12 +241,20 @@ namespace ShaderToggler
 					break;
 				}
 				index = (index + 1) % total;
+				if(startIdx < 0 && index == 0) break;
 			}
 			return;
 		}
 
 		const int total = static_cast<int>(_filteredHuntedShaderHashes.size());
-		_activeHuntedShaderIndex = (_activeHuntedShaderIndex + stepCount) % total;
+		if(_activeHuntedShaderIndex < 0)
+		{
+			_activeHuntedShaderIndex = 0;
+		}
+		else
+		{
+			_activeHuntedShaderIndex = (_activeHuntedShaderIndex + stepCount) % total;
+		}
 		if(_activeHuntedShaderIndex < 0)
 		{
 			_activeHuntedShaderIndex += total;
@@ -264,8 +281,9 @@ namespace ShaderToggler
 			}
 
 			const int total = static_cast<int>(_filteredHuntedShaderHashes.size());
-			int index = (_activeHuntedShaderIndex - 1 + total) % total;
-			while(index != _activeHuntedShaderIndex)
+			int startIdx = (_activeHuntedShaderIndex < 0) ? 0 : _activeHuntedShaderIndex;
+			int index = (startIdx - 1 + total) % total;
+			while(index != startIdx)
 			{
 				uint32_t hash = _filteredHuntedShaderHashes[index];
 				if(_markedShaderHashes.count(hash) == 1)
@@ -280,10 +298,17 @@ namespace ShaderToggler
 		}
 
 		const int total = static_cast<int>(_filteredHuntedShaderHashes.size());
-		_activeHuntedShaderIndex = (_activeHuntedShaderIndex - stepCount) % total;
 		if(_activeHuntedShaderIndex < 0)
 		{
-			_activeHuntedShaderIndex += total;
+			_activeHuntedShaderIndex = total - 1;
+		}
+		else
+		{
+			_activeHuntedShaderIndex = (_activeHuntedShaderIndex - stepCount) % total;
+			if(_activeHuntedShaderIndex < 0)
+			{
+				_activeHuntedShaderIndex += total;
+			}
 		}
 		setActiveHuntedShaderHandle();
 	}

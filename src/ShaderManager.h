@@ -105,6 +105,7 @@ namespace ShaderToggler
 		bool isInHuntingMode() { return _isInHuntingMode;}
 		uint32_t getActiveHuntedShaderHash() { return _activeHuntedShaderHash;}
 		int getActiveHuntedShaderIndex() { return _activeHuntedShaderIndex; }
+		void clearActiveHuntedShader() { _activeHuntedShaderIndex = -1; _activeHuntedShaderHash = 0; }
 		void toggleHideMarkedShaders() { _hideMarkedShaders=!_hideMarkedShaders;}
 
 		bool isHuntedShaderMarked()

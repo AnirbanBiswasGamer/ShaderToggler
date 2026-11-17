@@ -169,6 +169,9 @@ static bool g_xinputInitialized = false;
 static bool g_enableGamepad = false;
 static WORD g_prevGamepadButtons = 0;
 
+void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditing);
+
+
 static void initXInput()
 {
 	if(g_xinputInitialized)
@@ -585,9 +588,45 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 		}
 		ImGui::PopItemWidth();
 
-		const int idx = (totalFiltered > 0) ? (toDisplay.getActiveHuntedShaderIndex() + 1) : 0;
+		const int activeIdx = toDisplay.getActiveHuntedShaderIndex();
 		const uint32_t currentHash = toDisplay.getActiveHuntedShaderHash();
-		ImGui::Text("Current selected %s shader: %d / %d (Hash: 0x%08X)", shaderType, idx, totalFiltered, currentHash);
+		if(currentHash != 0 && activeIdx >= 0)
+		{
+			ImGui::Text("Current selected %s shader: %d / %d (Hash: 0x%08X)", shaderType, activeIdx + 1, totalFiltered, currentHash);
+		}
+		else
+		{
+			ImGui::Text("Current selected %s shader: [None / Unblocked] (Candidates: %d)", shaderType, totalFiltered);
+		}
+
+		char prevBtn[32], nextBtn[32], toggleBtn[64], clearBtn[32];
+		sprintf_s(prevBtn, "< Prev##%s", shaderType);
+		sprintf_s(nextBtn, "Next >##%s", shaderType);
+		sprintf_s(toggleBtn, toDisplay.isHuntedShaderMarked() ? "Unmark from Group##%s" : "Mark in Group##%s", shaderType);
+		sprintf_s(clearBtn, "Unblock / None##%s", shaderType);
+
+		if(ImGui::SmallButton(prevBtn))
+		{
+			toDisplay.huntPreviousShader(false, 1);
+		}
+		ImGui::SameLine();
+		if(ImGui::SmallButton(nextBtn))
+		{
+			toDisplay.huntNextShader(false, 1);
+		}
+		if(currentHash != 0)
+		{
+			ImGui::SameLine();
+			if(ImGui::SmallButton(toggleBtn))
+			{
+				toDisplay.toggleMarkOnHuntedShader();
+			}
+			ImGui::SameLine();
+			if(ImGui::SmallButton(clearBtn))
+			{
+				toDisplay.clearActiveHuntedShader();
+			}
+		}
 
 		if(currentHash != 0)
 		{
@@ -643,16 +682,32 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 			ImGui::End();
 			return;
 		}
-		string editingGroupName = "";
+		ToggleGroup* pEditingGroup = nullptr;
 		for(auto& group:g_toggleGroups)
 		{
 			if(group.getId()==g_toggleGroupIdShaderEditing)
 			{
-				editingGroupName = group.getName();
+				pEditingGroup = &group;
 				break;
 			}
 		}
 		
+		if(pEditingGroup != nullptr)
+		{
+			ImGui::Text("Editing shaders for group: %s", pEditingGroup->getName().c_str());
+			ImGui::SameLine();
+			if(ImGui::Button("Done (Save & Exit)"))
+			{
+				endShaderEditing(true, *pEditingGroup);
+			}
+			ImGui::SameLine();
+			if(ImGui::Button("Cancel"))
+			{
+				endShaderEditing(false, *pEditingGroup);
+			}
+			ImGui::Separator();
+		}
+
 		displayShaderManagerStats(g_vertexShaderManager, "vertex");
 		displayShaderManagerStats(g_pixelShaderManager, "pixel");
 		displayShaderManagerStats(g_computeShaderManager, "compute");
@@ -664,10 +719,6 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 		}
 		else
 		{
-			if(g_vertexShaderManager.isInHuntingMode() || g_pixelShaderManager.isInHuntingMode() || g_computeShaderManager.isInHuntingMode())
-			{
-				ImGui::Text("Editing the shaders for group: %s", editingGroupName.c_str());
-			}
 			displayShaderManagerInfo(g_vertexShaderManager, "vertex");
 			displayShaderManagerInfo(g_pixelShaderManager, "pixel");
 			displayShaderManagerInfo(g_computeShaderManager, "compute");
@@ -1115,11 +1166,11 @@ void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditin
 	if(acceptCollectedShaderHashes && g_toggleGroupIdShaderEditing == groupEditing.getId())
 	{
 		groupEditing.storeCollectedHashes(g_pixelShaderManager.getMarkedShaderHashes(), g_vertexShaderManager.getMarkedShaderHashes(), g_computeShaderManager.getMarkedShaderHashes());
-		g_pixelShaderManager.stopHuntingMode();
-		g_vertexShaderManager.stopHuntingMode();
-		g_computeShaderManager.stopHuntingMode();
-		rebuildActiveBlockedShaderHashesCache();
 	}
+	g_pixelShaderManager.stopHuntingMode();
+	g_vertexShaderManager.stopHuntingMode();
+	g_computeShaderManager.stopHuntingMode();
+	rebuildActiveBlockedShaderHashesCache();
 	g_toggleGroupIdShaderEditing = -1;
 }
 
