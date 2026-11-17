@@ -97,39 +97,8 @@ namespace ShaderToggler
 		}
 
 		initCompiler();
-		scanDesktopForFixes();
 		reloadOverrides();
 		_initialized = true;
-	}
-
-	void ShaderOverrideManager::scanDesktopForFixes()
-	{
-		WCHAR userProfile[MAX_PATH];
-		if(GetEnvironmentVariableW(L"USERPROFILE", userProfile, ARRAYSIZE(userProfile)) > 0)
-		{
-			std::filesystem::path desktopPath = std::filesystem::path(userProfile) / "Desktop";
-			std::error_code ec;
-			if(std::filesystem::exists(desktopPath, ec))
-			{
-				for(const auto& entry : std::filesystem::directory_iterator(desktopPath, ec))
-				{
-					if(entry.is_regular_file())
-					{
-						std::string filename = entry.path().filename().string();
-						if(filename.find("-ps_replace.txt") != std::string::npos ||
-						   filename.find("-vs_replace.txt") != std::string::npos ||
-						   filename.find("_replace.txt") != std::string::npos)
-						{
-							std::filesystem::path dest = _fixesPath / filename;
-							if(!std::filesystem::exists(dest, ec))
-							{
-								std::filesystem::copy_file(entry.path(), dest, std::filesystem::copy_options::overwrite_existing, ec);
-							}
-						}
-					}
-				}
-			}
-		}
 	}
 
 	void ShaderOverrideManager::reloadOverrides()

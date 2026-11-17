@@ -45,7 +45,6 @@ namespace ShaderToggler
 
 		void initCompiler();
 		void loadFileOverride(const std::filesystem::path& filePath);
-		void scanDesktopForFixes();
 
 		std::filesystem::path _basePath;
 		std::filesystem::path _fixesPath;
