@@ -42,6 +42,52 @@ namespace ShaderToggler
 		return nullptr;
 	}
 
+	struct DXBCOperand
+	{
+		DWORD type = 0;
+		DWORD regIndex = 0;
+		DWORD dim = 0;
+		DWORD nextOffset = 0;
+	};
+
+	static DXBCOperand parseDXBCOperand(const DWORD* tokens, DWORD opIdx, DWORD maxTokens)
+	{
+		DXBCOperand op;
+		if(opIdx >= maxTokens) return op;
+
+		DWORD opTok = tokens[opIdx];
+		op.type = (opTok >> 12) & 0xFF;
+		op.dim = (opTok >> 20) & 0x3;
+		DWORD cur = opIdx + 1;
+
+		// Extended operand modifier (e.g. negate, abs)
+		if(opTok & 0x80000000)
+		{
+			cur++;
+		}
+
+		if(op.dim == 0)
+		{
+			op.regIndex = 0;
+		}
+		else if(op.dim == 1 && cur < maxTokens)
+		{
+			op.regIndex = tokens[cur++];
+		}
+		else if(op.dim == 2 && cur + 1 < maxTokens)
+		{
+			op.regIndex = tokens[cur + 1];
+			cur += 2;
+		}
+		else if(op.dim == 3 && cur + 2 < maxTokens)
+		{
+			cur += 3;
+		}
+
+		op.nextOffset = cur;
+		return op;
+	}
+
 	bool ShaderPatcher::patchCelOutlineInstruction(uint8_t* pBytecode, size_t size, std::string& outDetails)
 	{
 		DWORD shexLen = 0;
@@ -64,14 +110,21 @@ namespace ShaderToggler
 			return false;
 		}
 
-		// Track candidate MAD / MUL instructions that perform cel-outline blending
-		// In anime/cel-shaded shaders, the line blend is typically the LAST mad/mul instruction
-		// before writing to the output color register o0
-		int patchedIndex = -1;
-		DWORD lastMadIdx = 0;
-		DWORD lastMadLen = 0;
+		struct ParsedInst
+		{
+			DWORD tokIdx = 0;
+			DWORD opcode = 0;
+			DWORD len = 0;
+			DXBCOperand op0; // dest
+			DXBCOperand op1; // src0
+			DXBCOperand op2; // src1
+			DXBCOperand op3; // src2
+			bool hasImmOne = false;
+		};
 
+		std::vector<ParsedInst> insts;
 		DWORD idx = 2; // skip version and length tokens
+
 		while(idx < totalTokens)
 		{
 			DWORD opcodeToken = tokens[idx];
@@ -79,29 +132,135 @@ namespace ShaderToggler
 			DWORD len = (opcodeToken >> 24) & 0x7F;
 			if(len == 0 || idx + len > totalTokens) break;
 
-			if(opcode == D3D10_OPCODE_MAD || opcode == D3D10_OPCODE_MUL)
+			ParsedInst info;
+			info.tokIdx = idx;
+			info.opcode = opcode;
+			info.len = len;
+
+			DWORD cur = idx + 1;
+			if(opcodeToken & 0x80000000)
 			{
-				lastMadIdx = idx;
-				lastMadLen = len;
+				cur++; // skip extended opcode token
 			}
+
+			// Check for immediate 1.0f constant (0x3F800000)
+			for(DWORD k = 0; k < len; ++k)
+			{
+				if(tokens[idx + k] == 0x3F800000)
+				{
+					info.hasImmOne = true;
+					break;
+				}
+			}
+
+			// Parse up to 4 operands
+			if(cur < idx + len)
+			{
+				info.op0 = parseDXBCOperand(tokens, cur, idx + len);
+				cur = info.op0.nextOffset;
+			}
+			if(cur < idx + len)
+			{
+				info.op1 = parseDXBCOperand(tokens, cur, idx + len);
+				cur = info.op1.nextOffset;
+			}
+			if(cur < idx + len)
+			{
+				info.op2 = parseDXBCOperand(tokens, cur, idx + len);
+				cur = info.op2.nextOffset;
+			}
+			if(cur < idx + len)
+			{
+				info.op3 = parseDXBCOperand(tokens, cur, idx + len);
+				cur = info.op3.nextOffset;
+			}
+
+			insts.push_back(info);
 			idx += len;
 		}
 
-		if(lastMadIdx > 0 && lastMadLen > 0)
+		int targetTokIdx = -1;
+		DWORD targetLen = 0;
+		DWORD targetDestReg = 0;
+
+		// Tier 1: Exact Cel-Outline Inverse Blend Pattern
+		// In anime shaders: (1 - SceneColor) * LineColor + SceneColor
+		// Represented as:
+		//   add rInv, -rScene, 1.0f
+		//   mad rScene, rInv, rLine, rScene (or mad rScene, rLine, rInv, rScene)
+		for(size_t i = 0; i < insts.size(); ++i)
 		{
-			// NOP out the last MAD/MUL instruction (cel-blend line contribution)
-			tokens[lastMadIdx] = (lastMadLen << 24) | D3D10_OPCODE_NOP;
-			for(DWORD j = 1; j < lastMadLen; ++j)
+			const auto& inst = insts[i];
+			if(inst.opcode == D3D10_OPCODE_MAD)
 			{
-				tokens[lastMadIdx + j] = 0;
+				// Check if destination temp register matches accumulator temp register (src2)
+				if(inst.op0.type == D3D10_OPERAND_TYPE_TEMP &&
+				   inst.op3.type == D3D10_OPERAND_TYPE_TEMP &&
+				   inst.op0.regIndex == inst.op3.regIndex)
+				{
+					// Check preceding 1..4 instructions for an ADD with 1.0f
+					for(int p = 1; p <= 4 && (static_cast<int>(i) - p) >= 0; ++p)
+					{
+						const auto& prev = insts[i - p];
+						if(prev.opcode == 0 && prev.hasImmOne) // opcode 0 == ADD
+						{
+							targetTokIdx = static_cast<int>(inst.tokIdx);
+							targetLen = inst.len;
+							targetDestReg = inst.op0.regIndex;
+							break;
+						}
+					}
+					if(targetTokIdx >= 0) break;
+				}
 			}
-			patchedIndex = static_cast<int>(lastMadIdx);
 		}
 
-		if(patchedIndex >= 0)
+		// Tier 2: Direct Scene Accumulator MAD (mad rScene, rLine, factor, rScene)
+		if(targetTokIdx < 0)
 		{
-			char buf[128];
-			sprintf_s(buf, "Neutralized cel-outline blend instruction (token offset %d)", patchedIndex);
+			for(size_t i = 0; i < insts.size(); ++i)
+			{
+				const auto& inst = insts[i];
+				if(inst.opcode == D3D10_OPCODE_MAD)
+				{
+					if(inst.op0.type == D3D10_OPERAND_TYPE_TEMP &&
+					   inst.op3.type == D3D10_OPERAND_TYPE_TEMP &&
+					   inst.op0.regIndex == inst.op3.regIndex)
+					{
+						targetTokIdx = static_cast<int>(inst.tokIdx);
+						targetLen = inst.len;
+						targetDestReg = inst.op0.regIndex;
+					}
+				}
+			}
+		}
+
+		// Tier 3: Pre-output fallback (last MAD before color transform/ret)
+		if(targetTokIdx < 0)
+		{
+			for(const auto& inst : insts)
+			{
+				if(inst.opcode == D3D10_OPCODE_MAD || inst.opcode == D3D10_OPCODE_MUL)
+				{
+					targetTokIdx = static_cast<int>(inst.tokIdx);
+					targetLen = inst.len;
+					targetDestReg = inst.op0.regIndex;
+				}
+			}
+		}
+
+		if(targetTokIdx >= 0 && targetLen > 0)
+		{
+			// NOP out the cel-outline blend instruction
+			tokens[targetTokIdx] = (targetLen << 24) | D3D10_OPCODE_NOP;
+			for(DWORD j = 1; j < targetLen; ++j)
+			{
+				tokens[targetTokIdx + j] = 0;
+			}
+
+			char buf[160];
+			sprintf_s(buf, "Neutralized cel-outline blend 'mad r%u, ... + r%u' (token %d). Water & scene intact!",
+			          targetDestReg, targetDestReg, targetTokIdx);
 			outDetails = buf;
 			return true;
 		}

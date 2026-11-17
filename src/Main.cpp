@@ -464,6 +464,9 @@ static void onResetCommandList(command_list *commandList)
 }
 
 
+static std::unordered_map<const void*, uint32_t> g_overrideCodeToOrigCrc;
+static std::shared_mutex g_overrideCodeMutex;
+
 static bool onCreatePipeline(device *device, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects)
 {
 	if(device == nullptr || subobjects == nullptr || subobjectCount == 0)
@@ -501,6 +504,10 @@ static bool onCreatePipeline(device *device, pipeline_layout, uint32_t subobject
 					const auto* replacement = ShaderOverrideManager::getInstance().findOverride(crc, fnv1, fnv1a);
 					if(replacement != nullptr && !replacement->empty())
 					{
+						{
+							std::unique_lock lock(g_overrideCodeMutex);
+							g_overrideCodeToOrigCrc[replacement->data()] = crc;
+						}
 						shaderDesc->code = replacement->data();
 						shaderDesc->code_size = replacement->size();
 						modified = true;
@@ -532,7 +539,15 @@ static void onInitPipeline(device *device, pipeline_layout, uint32_t subobjectCo
 			case pipeline_subobject_type::vertex_shader:
 			{
 				const auto& shaderDesc = *static_cast<const shader_desc *>(subobjects[i].data);
-				const uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				{
+					std::shared_lock lock(g_overrideCodeMutex);
+					auto it = g_overrideCodeToOrigCrc.find(shaderDesc.code);
+					if(it != g_overrideCodeToOrigCrc.end())
+					{
+						shaderHash = it->second;
+					}
+				}
 				if(shaderHash != 0 && shaderDesc.code != nullptr && shaderDesc.code_size > 0)
 				{
 					ShaderAnalyzer::getInstance().storeBytecode(shaderHash, shaderDesc.code, shaderDesc.code_size);
@@ -543,7 +558,15 @@ static void onInitPipeline(device *device, pipeline_layout, uint32_t subobjectCo
 			case pipeline_subobject_type::pixel_shader:
 			{
 				const auto& shaderDesc = *static_cast<const shader_desc *>(subobjects[i].data);
-				const uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				{
+					std::shared_lock lock(g_overrideCodeMutex);
+					auto it = g_overrideCodeToOrigCrc.find(shaderDesc.code);
+					if(it != g_overrideCodeToOrigCrc.end())
+					{
+						shaderHash = it->second;
+					}
+				}
 				if(shaderHash != 0 && shaderDesc.code != nullptr && shaderDesc.code_size > 0)
 				{
 					ShaderAnalyzer::getInstance().storeBytecode(shaderHash, shaderDesc.code, shaderDesc.code_size);
@@ -554,7 +577,15 @@ static void onInitPipeline(device *device, pipeline_layout, uint32_t subobjectCo
 			case pipeline_subobject_type::compute_shader:
 			{
 				const auto& shaderDesc = *static_cast<const shader_desc *>(subobjects[i].data);
-				const uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+				{
+					std::shared_lock lock(g_overrideCodeMutex);
+					auto it = g_overrideCodeToOrigCrc.find(shaderDesc.code);
+					if(it != g_overrideCodeToOrigCrc.end())
+					{
+						shaderHash = it->second;
+					}
+				}
 				if(shaderHash != 0 && shaderDesc.code != nullptr && shaderDesc.code_size > 0)
 				{
 					ShaderAnalyzer::getInstance().storeBytecode(shaderHash, shaderDesc.code, shaderDesc.code_size);
@@ -794,11 +825,21 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 				ImGui::SameLine();
 				ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "%s", s_lastPatchMsg.c_str());
 			}
+			const bool hasActivePatch = ShaderOverrideManager::getInstance().hasOverride(currentHash, 0, 0);
+			if(hasActivePatch)
+			{
+				ImGui::SameLine();
+				ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), "[Patched in ShaderFixes: Outline Neutralized]");
+			}
 		}
 
 		if(toDisplay.isHuntedShaderMarked())
 		{
 			displayIsPartOfToggleGroup();
+			if(ShaderOverrideManager::getInstance().hasOverride(currentHash, 0, 0))
+			{
+				ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "  -> Tip: Click 'Unmark from Group' above so the draw call is NOT dropped (keeps water and signboards visible)!");
+			}
 		}
 	}
 }
