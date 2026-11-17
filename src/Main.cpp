@@ -38,12 +38,14 @@
 #include "crc32_hash.hpp"
 #include "ShaderManager.h"
 #include "ShaderAnalyzer.h"
+#include "ShaderOverrideManager.h"
 #include "CDataFile.h"
 #include "ToggleGroup.h"
 #include <vector>
 #include <filesystem>
 #include <chrono>
 #include <windows.h>
+#include <shellapi.h>
 #include <Xinput.h>
 #include <shared_mutex>
 #include <sstream>
@@ -454,6 +456,59 @@ static void onResetCommandList(command_list *commandList)
 }
 
 
+static bool onCreatePipeline(device *device, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects)
+{
+	if(device == nullptr || subobjects == nullptr || subobjectCount == 0)
+	{
+		return false;
+	}
+
+	if(!ShaderOverrideManager::getInstance().isEnabled())
+	{
+		return false;
+	}
+
+	bool modified = false;
+
+	for(uint32_t i = 0; i < subobjectCount; ++i)
+	{
+		if(subobjects[i].data == nullptr)
+		{
+			continue;
+		}
+
+		switch (subobjects[i].type)
+		{
+			case pipeline_subobject_type::vertex_shader:
+			case pipeline_subobject_type::pixel_shader:
+			case pipeline_subobject_type::compute_shader:
+			{
+				auto* shaderDesc = const_cast<shader_desc*>(static_cast<const shader_desc*>(subobjects[i].data));
+				if(shaderDesc->code != nullptr && shaderDesc->code_size > 0)
+				{
+					const uint32_t crc = compute_crc32(static_cast<const uint8_t*>(shaderDesc->code), shaderDesc->code_size);
+					const uint64_t fnv1 = compute_fnv1_64(static_cast<const uint8_t*>(shaderDesc->code), shaderDesc->code_size);
+					const uint64_t fnv1a = compute_fnv1a_64(static_cast<const uint8_t*>(shaderDesc->code), shaderDesc->code_size);
+
+					const auto* replacement = ShaderOverrideManager::getInstance().findOverride(crc, fnv1, fnv1a);
+					if(replacement != nullptr && !replacement->empty())
+					{
+						shaderDesc->code = replacement->data();
+						shaderDesc->code_size = replacement->size();
+						modified = true;
+					}
+				}
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	return modified;
+}
+
+
 static void onInitPipeline(device *device, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
 {
 	// shader has been created, we will now create a hash and store it with the handle we got.
@@ -654,6 +709,24 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 			{
 				ImGui::SameLine();
 				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%s", s_lastDumpMsg.c_str());
+			}
+
+			ImGui::SameLine();
+			char patchBtnLabel[64];
+			sprintf_s(patchBtnLabel, "Auto-Patch Outline##%s", shaderType);
+			static std::string s_lastPatchMsg = "";
+			static uint32_t s_lastPatchedHash = 0;
+			if(ImGui::SmallButton(patchBtnLabel))
+			{
+				std::string msg;
+				ShaderOverrideManager::getInstance().autoPatchOutline(currentHash, toDisplay.getShaderType(), msg);
+				s_lastPatchedHash = currentHash;
+				s_lastPatchMsg = msg;
+			}
+			if(s_lastPatchedHash == currentHash && !s_lastPatchMsg.empty())
+			{
+				ImGui::SameLine();
+				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "%s", s_lastPatchMsg.c_str());
 			}
 		}
 
@@ -1256,6 +1329,30 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	}
 	ImGui::Separator();
 
+	if(ImGui::CollapsingHeader("Shader Overrides & Modding (ShaderFixes)", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		bool overridesEnabled = ShaderOverrideManager::getInstance().isEnabled();
+		if(ImGui::Checkbox("Enable In-Addon Shader Overrides / Patches", &overridesEnabled))
+		{
+			ShaderOverrideManager::getInstance().setEnabled(overridesEnabled);
+		}
+		ImGui::SameLine();
+		showHelpMarker("When enabled, replaces game shaders with custom or auto-patched shaders from the ShaderFixes/ folder (compatible with 3Dmigoto replacement files).");
+
+		ImGui::Text("Active Overrides loaded: %zu", ShaderOverrideManager::getInstance().getOverrideCount());
+		ImGui::SameLine();
+		if(ImGui::Button("Reload from ShaderFixes"))
+		{
+			ShaderOverrideManager::getInstance().reloadOverrides();
+		}
+		ImGui::SameLine();
+		if(ImGui::Button("Open ShaderFixes Folder"))
+		{
+			ShellExecuteW(nullptr, L"open", ShaderOverrideManager::getInstance().getFixesPath().c_str(), nullptr, nullptr, SW_SHOW);
+		}
+	}
+	ImGui::Separator();
+
 	if(ImGui::CollapsingHeader("Hunting keyboard shortcuts"))
 	{
 		ImGui::PushTextWrapPos();
@@ -1721,6 +1818,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 				g_iniFileName = g_defaultIniFileName;
 			}
 
+			ShaderOverrideManager::getInstance().init(basePath);
+			reshade::register_event<reshade::addon_event::create_pipeline>(onCreatePipeline);
 			reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 			reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 			reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
@@ -1750,6 +1849,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		}
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+		reshade::unregister_event<reshade::addon_event::create_pipeline>(onCreatePipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 		reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
 		reshade::unregister_event<reshade::addon_event::bind_pipeline>(onBindPipeline);

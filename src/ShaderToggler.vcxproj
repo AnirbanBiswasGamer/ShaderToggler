@@ -178,6 +178,7 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="ShaderAnalyzer.h" />
     <ClInclude Include="ShaderManager.h" />
+    <ClInclude Include="ShaderOverrideManager.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="ToggleGroup.h" />
   </ItemGroup>
@@ -187,6 +188,7 @@
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderManager.cpp" />
+    <ClCompile Include="ShaderOverrideManager.cpp" />
     <ClCompile Include="ToggleGroup.cpp" />
   </ItemGroup>
   <ItemGroup>
