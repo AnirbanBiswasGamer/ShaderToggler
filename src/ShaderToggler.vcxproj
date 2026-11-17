@@ -174,21 +174,25 @@
   <ItemGroup>
     <ClInclude Include="CDataFile.h" />
     <ClInclude Include="crc32_hash.hpp" />
+    <ClInclude Include="DXBCChecksum.h" />
     <ClInclude Include="KeyData.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="ShaderAnalyzer.h" />
     <ClInclude Include="ShaderManager.h" />
     <ClInclude Include="ShaderOverrideManager.h" />
+    <ClInclude Include="ShaderPatcher.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="ToggleGroup.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CDataFile.cpp" />
+    <ClCompile Include="DXBCChecksum.cpp" />
     <ClCompile Include="KeyData.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="ShaderAnalyzer.cpp" />
     <ClCompile Include="ShaderManager.cpp" />
     <ClCompile Include="ShaderOverrideManager.cpp" />
+    <ClCompile Include="ShaderPatcher.cpp" />
     <ClCompile Include="ToggleGroup.cpp" />
   </ItemGroup>
   <ItemGroup>

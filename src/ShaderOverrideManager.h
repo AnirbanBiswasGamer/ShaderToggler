@@ -28,6 +28,8 @@ namespace ShaderToggler
 		// Lookup by 32-bit CRC or 64-bit FNV-1 / FNV-1a
 		const std::vector<uint8_t>* findOverride(uint32_t crc32, uint64_t fnv1, uint64_t fnv1a);
 		bool hasOverride(uint32_t crc32, uint64_t fnv1, uint64_t fnv1a);
+		void addOverride(uint32_t crc32, const std::vector<uint8_t>& bytecode);
+		void removeOverride(uint32_t crc32);
 
 		// Dynamic compilation
 		bool compileHLSL(const std::string& hlslCode, const std::string& sourceName, const std::string& targetProfile,
@@ -37,6 +39,7 @@ namespace ShaderToggler
 		bool autoPatchOutline(uint32_t crc32Hash, int shaderType, std::string& outMsg);
 
 		size_t getOverrideCount();
+		const std::filesystem::path& getBasePath() const { return _basePath; }
 		const std::filesystem::path& getFixesPath() const { return _fixesPath; }
 
 	private:

@@ -330,11 +330,17 @@ namespace ShaderToggler
 			else if(shaderType == 1) // Vertex shader
 			{
 				// Inverted hull outline check in vertex shader: normal multiplied by width and added to position
-				bool hasNormalKeyword = lowerDisasm.find("normal") != std::string::npos;
-				bool hasHullMath = (lowerDisasm.find("mul ") != std::string::npos || lowerDisasm.find("mad ") != std::string::npos) &&
-				                   lowerDisasm.find("add ") != std::string::npos;
+				bool hasExplicitHullKeyword = lowerDisasm.find("outline") != std::string::npos ||
+				                             lowerDisasm.find("hull") != std::string::npos ||
+				                             lowerDisasm.find("thickness") != std::string::npos ||
+				                             lowerDisasm.find("linesize") != std::string::npos ||
+				                             lowerDisasm.find("expand") != std::string::npos;
 
-				if(hasNormalKeyword && hasHullMath)
+				bool hasHullExtrusion = (lowerDisasm.find("mad ") != std::string::npos || lowerDisasm.find("mul ") != std::string::npos) &&
+				                        lowerDisasm.find("normal") != std::string::npos &&
+				                        (lowerDisasm.find("position") != std::string::npos || lowerDisasm.find("v0") != std::string::npos);
+
+				if(hasExplicitHullKeyword && hasHullExtrusion)
 				{
 					result.categoryFlags |= Category_OutlineEdge;
 					result.categorySummary = "Inverted-Hull Outline";

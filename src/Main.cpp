@@ -39,6 +39,7 @@
 #include "ShaderManager.h"
 #include "ShaderAnalyzer.h"
 #include "ShaderOverrideManager.h"
+#include "ShaderPatcher.h"
 #include "CDataFile.h"
 #include "ToggleGroup.h"
 #include <vector>
@@ -711,22 +712,65 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%s", s_lastDumpMsg.c_str());
 			}
 
-			ImGui::SameLine();
-			char patchBtnLabel[64];
-			sprintf_s(patchBtnLabel, "Auto-Patch Outline##%s", shaderType);
+			WCHAR bufModule[MAX_PATH];
+			GetModuleFileNameW(nullptr, bufModule, ARRAYSIZE(bufModule));
+			std::filesystem::path currentBasePath = std::filesystem::path(bufModule).parent_path();
+			const bool isPatched = ShaderPatcher::getInstance().isPatchActive(currentHash, currentBasePath);
+
 			static std::string s_lastPatchMsg = "";
 			static uint32_t s_lastPatchedHash = 0;
-			if(ImGui::SmallButton(patchBtnLabel))
+
+			if(isPatched)
 			{
-				std::string msg;
-				ShaderOverrideManager::getInstance().autoPatchOutline(currentHash, toDisplay.getShaderType(), msg);
-				s_lastPatchedHash = currentHash;
-				s_lastPatchMsg = msg;
+				ImGui::SameLine();
+				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "[Patched & Active]");
+				ImGui::SameLine();
+				char revertBtnLabel[64];
+				sprintf_s(revertBtnLabel, "Revert Patch##%s", shaderType);
+				if(ImGui::SmallButton(revertBtnLabel))
+				{
+					std::string msg;
+					ShaderPatcher::getInstance().revertPatch(currentHash, currentBasePath, msg);
+					s_lastPatchedHash = currentHash;
+					s_lastPatchMsg = msg;
+				}
 			}
+			else
+			{
+				ImGui::SameLine();
+				uint32_t flags = ShaderAnalyzer::getInstance().getCategoryFlags(currentHash, toDisplay.getShaderType());
+				char patchBtnLabel[64];
+				PatchStrategy strategyToUse = PatchStrategy::AutoDetect;
+
+				if(toDisplay.getShaderType() == 1) // Vertex shader
+				{
+					sprintf_s(patchBtnLabel, "Collapse Inverted Hull##%s", shaderType);
+					strategyToUse = PatchStrategy::InvertedHull_VertexNormal;
+				}
+				else if((flags & Category_BloomBlur) != 0 || (flags & Category_FogAtmospheric) != 0 || (flags & Category_Vignette) != 0)
+				{
+					sprintf_s(patchBtnLabel, "Bypass Blur (Keep Scene)##%s", shaderType);
+					strategyToUse = PatchStrategy::Blur_PassThrough;
+				}
+				else
+				{
+					sprintf_s(patchBtnLabel, "Auto-Patch Cel-Outline##%s", shaderType);
+					strategyToUse = PatchStrategy::CelOutline_MadBlend;
+				}
+
+				if(ImGui::SmallButton(patchBtnLabel))
+				{
+					std::string msg;
+					ShaderPatcher::getInstance().autoPatchShader(currentHash, toDisplay.getShaderType(), strategyToUse, currentBasePath, msg);
+					s_lastPatchedHash = currentHash;
+					s_lastPatchMsg = msg;
+				}
+			}
+
 			if(s_lastPatchedHash == currentHash && !s_lastPatchMsg.empty())
 			{
 				ImGui::SameLine();
-				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "%s", s_lastPatchMsg.c_str());
+				ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f), "%s", s_lastPatchMsg.c_str());
 			}
 		}
 

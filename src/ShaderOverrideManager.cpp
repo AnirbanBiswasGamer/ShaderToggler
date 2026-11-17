@@ -1,5 +1,6 @@
 #include "ShaderOverrideManager.h"
 #include "ShaderAnalyzer.h"
+#include "ShaderPatcher.h"
 #include <unknwn.h>
 #include <fstream>
 #include <sstream>
@@ -344,114 +345,21 @@ namespace ShaderToggler
 		return _overridesByCrc32.size() + _overridesByFnv64.size();
 	}
 
+	void ShaderOverrideManager::addOverride(uint32_t crc32, const std::vector<uint8_t>& bytecode)
+	{
+		std::unique_lock lock(_overrideMutex);
+		_overridesByCrc32[crc32] = bytecode;
+	}
+
+	void ShaderOverrideManager::removeOverride(uint32_t crc32)
+	{
+		std::unique_lock lock(_overrideMutex);
+		_overridesByCrc32.erase(crc32);
+	}
+
 	bool ShaderOverrideManager::autoPatchOutline(uint32_t crc32Hash, int shaderType, std::string& outMsg)
 	{
-		if(crc32Hash == 0)
-		{
-			outMsg = "Invalid shader hash";
-			return false;
-		}
-
-		// Check if we have source in _overrideSources
-		std::string hlsl;
-		{
-			std::shared_lock lock(_overrideMutex);
-			auto it = _overrideSources.find(crc32Hash);
-			if(it != _overrideSources.end())
-			{
-				hlsl = it->second;
-			}
-		}
-
-		// If no cached source, check ShaderFixes or Desktop for matching files
-		if(hlsl.empty())
-		{
-			std::error_code ec;
-			for(const auto& entry : std::filesystem::directory_iterator(_fixesPath, ec))
-			{
-				if(entry.is_regular_file())
-				{
-					std::string ext = entry.path().extension().string();
-					if(ext == ".hlsl" || ext == ".txt")
-					{
-						std::ifstream in(entry.path());
-						if(in.is_open())
-						{
-							std::stringstream ss;
-							ss << in.rdbuf();
-							hlsl = ss.str();
-							break;
-						}
-					}
-				}
-			}
-		}
-
-		if(hlsl.empty())
-		{
-			outMsg = "No HLSL source available to patch for this shader";
-			return false;
-		}
-
-		// Neutralize outline blend in HLSL
-		size_t blendPos = hlsl.find("r0.xyz = r2.xyz * r1.xyz + r0.xyz;");
-		if(blendPos != std::string::npos)
-		{
-			if(hlsl.find("r1.xyz = float3(0, 0, 0);") == std::string::npos)
-			{
-				hlsl.insert(blendPos, "r1.xyz = float3(0, 0, 0); // Auto-neutralized outline\n  ");
-			}
-		}
-		else
-		{
-			// Check for MRT o1 outline target
-			size_t o1Pos = hlsl.find("o1.xyzw = ");
-			if(o1Pos != std::string::npos)
-			{
-				size_t semi = hlsl.find(";", o1Pos);
-				if(semi != std::string::npos)
-				{
-					hlsl.replace(o1Pos, semi - o1Pos + 1, "o1.xyzw = float4(0, 0, 0, 0);");
-				}
-			}
-		}
-
-		std::vector<uint8_t> compiledBytecode;
-		std::string errors;
-		std::string profile = (shaderType == 1) ? "vs_4_0" : "ps_4_0";
-		char hexBuf[32];
-		sprintf_s(hexBuf, "0x%08X", crc32Hash);
-
-		if(!compileHLSL(hlsl, hexBuf, profile, "main", compiledBytecode, errors))
-		{
-			outMsg = "Compilation failed: " + errors;
-			return false;
-		}
-
-		// Save patched files
-		char csoName[64], hlslName[64];
-		sprintf_s(csoName, "0x%08X.cso", crc32Hash);
-		sprintf_s(hlslName, "0x%08X.hlsl", crc32Hash);
-
-		std::ofstream outCso(_fixesPath / csoName, std::ios::binary);
-		if(outCso.is_open())
-		{
-			outCso.write(reinterpret_cast<const char*>(compiledBytecode.data()), compiledBytecode.size());
-		}
-
-		std::ofstream outHlsl(_fixesPath / hlslName);
-		if(outHlsl.is_open())
-		{
-			outHlsl << hlsl;
-		}
-
-		{
-			std::unique_lock lock(_overrideMutex);
-			_overridesByCrc32[crc32Hash] = compiledBytecode;
-			_overrideSources[crc32Hash] = hlsl;
-		}
-
-		outMsg = "Outline patched & saved to ShaderFixes/" + std::string(csoName);
-		return true;
+		return ShaderPatcher::getInstance().autoPatchShader(
+			crc32Hash, shaderType, PatchStrategy::AutoDetect, _basePath, outMsg);
 	}
 }
