@@ -36,7 +36,7 @@
 
 namespace ShaderToggler
 {
-	ToggleGroup::ToggleGroup(std::string name, int id): _id(id), _isActive(false), _isEditing(false), _isActiveAtStartup(false)
+	ToggleGroup::ToggleGroup(std::string name, int id): _id(id), _isActive(false), _isEditing(false), _isActiveAtStartup(false), _isInverted(false)
 	{
 		_name = name.size() > 0 ? name : "Default";
 	}
@@ -87,19 +87,43 @@ namespace ShaderToggler
 
 	bool ToggleGroup::isBlockedPixelShader(uint32_t shaderHash)
 	{
-		return _isActive && shaderHash > 0 && (_pixelShaderHashes.count(shaderHash)==1);
+		if(!_isActive || shaderHash == 0)
+		{
+			return false;
+		}
+		if(_isInverted)
+		{
+			return !_pixelShaderHashes.empty() && (_pixelShaderHashes.count(shaderHash) == 0);
+		}
+		return _pixelShaderHashes.count(shaderHash) == 1;
 	}
 
 
 	bool ToggleGroup::isBlockedVertexShader(uint32_t shaderHash)
 	{
-		return _isActive && shaderHash > 0 && (_vertexShaderHashes.count(shaderHash) == 1);
+		if(!_isActive || shaderHash == 0)
+		{
+			return false;
+		}
+		if(_isInverted)
+		{
+			return !_vertexShaderHashes.empty() && (_vertexShaderHashes.count(shaderHash) == 0);
+		}
+		return _vertexShaderHashes.count(shaderHash) == 1;
 	}
 
 
 	bool ToggleGroup::isBlockedComputeShader(uint32_t shaderHash)
 	{
-		return _isActive && shaderHash > 0 && (_computeShaderHashes.count(shaderHash) == 1);
+		if(!_isActive || shaderHash == 0)
+		{
+			return false;
+		}
+		if(_isInverted)
+		{
+			return !_computeShaderHashes.empty() && (_computeShaderHashes.count(shaderHash) == 0);
+		}
+		return _computeShaderHashes.count(shaderHash) == 1;
 	}
 
 
@@ -155,6 +179,7 @@ namespace ShaderToggler
 		iniFile.SetValue("Name", _name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", _keyData.getKeyForIniFile(), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", _isActiveAtStartup, "", sectionRoot);
+		iniFile.SetBool("IsInverted", _isInverted, "", sectionRoot);
 	}
 
 
@@ -244,6 +269,7 @@ namespace ShaderToggler
 			_keyData.setKeyFromIniFile(toggleKeyValue);
 		}
 		_isActiveAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
+		_isInverted = iniFile.GetBool("IsInverted", sectionRoot);
 		_isActive = _isActiveAtStartup;
 	}
 }

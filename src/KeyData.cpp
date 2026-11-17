@@ -109,7 +109,25 @@ namespace ShaderToggler
 	bool KeyData::isKeyPressed(const reshade::api::effect_runtime* runtime)
 	{
 		bool toReturn = runtime->is_key_pressed(_keyCode);
-		const bool altPressed = runtime->is_key_down(VK_MENU);;
+		const bool altPressed = runtime->is_key_down(VK_MENU);
+		const bool shiftPressed = runtime->is_key_down(VK_SHIFT);
+		const bool ctrlPressed = runtime->is_key_down(VK_CONTROL);
+
+		toReturn &= ((_altRequired && altPressed) || (!_altRequired && !altPressed));
+		toReturn &= ((_shiftRequired && shiftPressed) || (!_shiftRequired && !shiftPressed));
+		toReturn &= ((_ctrlRequired && ctrlPressed) || (!_ctrlRequired && !ctrlPressed));
+		return toReturn;
+	}
+
+
+	bool KeyData::isKeyDown(const reshade::api::effect_runtime* runtime)
+	{
+		if(_keyCode == 0)
+		{
+			return false;
+		}
+		bool toReturn = runtime->is_key_down(_keyCode);
+		const bool altPressed = runtime->is_key_down(VK_MENU);
 		const bool shiftPressed = runtime->is_key_down(VK_SHIFT);
 		const bool ctrlPressed = runtime->is_key_down(VK_CONTROL);
 

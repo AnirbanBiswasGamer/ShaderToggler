@@ -41,6 +41,7 @@
 #include "ToggleGroup.h"
 #include <vector>
 #include <filesystem>
+#include <chrono>
 
 using namespace reshade::api;
 using namespace ShaderToggler;
@@ -57,6 +58,92 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250;
 #define HASH_FILE_NAME	"ShaderToggler.ini"
 
+static const char* s_huntingKeyLabels[] = {
+	"Pixel shader: previous",
+	"Pixel shader: next",
+	"Pixel shader: mark/unmark",
+	"Vertex shader: previous",
+	"Vertex shader: next",
+	"Vertex shader: mark/unmark",
+	"Compute shader: previous",
+	"Compute shader: next",
+	"Compute shader: mark/unmark"
+};
+
+static const char* s_huntingKeyIniNames[] = {
+	"PixelPrevKey",
+	"PixelNextKey",
+	"PixelMarkKey",
+	"VertexPrevKey",
+	"VertexNextKey",
+	"VertexMarkKey",
+	"ComputePrevKey",
+	"ComputeNextKey",
+	"ComputeMarkKey"
+};
+
+static KeyData g_huntingKeys[9];
+static KeyData g_masterToggleKey;
+static bool g_isMasterKeyEditing = false;
+static int g_huntingKeyEditingIndex = -1;
+
+static std::string g_defaultIniFileName = "";
+static std::string g_gameSpecificIniFileName = "";
+
+struct KeyRepeatTracker
+{
+	std::chrono::steady_clock::time_point pressStartTime;
+	std::chrono::steady_clock::time_point lastRepeatTime;
+	bool isHeld = false;
+
+	bool check(bool isDown, bool isInitialPress)
+	{
+		auto now = std::chrono::steady_clock::now();
+		if (isInitialPress)
+		{
+			isHeld = true;
+			pressStartTime = now;
+			lastRepeatTime = now;
+			return true;
+		}
+		if (isDown && isHeld)
+		{
+			auto holdMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - pressStartTime).count();
+			if (holdMs >= 350)
+			{
+				auto repeatMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastRepeatTime).count();
+				if (repeatMs >= 60)
+				{
+					lastRepeatTime = now;
+					return true;
+				}
+			}
+		}
+		else
+		{
+			isHeld = false;
+		}
+		return false;
+	}
+};
+static KeyRepeatTracker g_repeatTrackers[6];
+
+static bool g_allGroupsDisabledByMaster = false;
+static std::vector<bool> g_savedGroupStates;
+
+static void initHuntingKeysDefaults()
+{
+	g_huntingKeys[0].setKey(VK_NUMPAD1);
+	g_huntingKeys[1].setKey(VK_NUMPAD2);
+	g_huntingKeys[2].setKey(VK_NUMPAD3);
+	g_huntingKeys[3].setKey(VK_NUMPAD4);
+	g_huntingKeys[4].setKey(VK_NUMPAD5);
+	g_huntingKeys[5].setKey(VK_NUMPAD6);
+	g_huntingKeys[6].setKey(VK_NUMPAD7);
+	g_huntingKeys[7].setKey(VK_NUMPAD8);
+	g_huntingKeys[8].setKey(VK_NUMPAD9);
+}
+
 static ShaderToggler::ShaderManager g_pixelShaderManager;
 static ShaderToggler::ShaderManager g_vertexShaderManager;
 static ShaderToggler::ShaderManager g_computeShaderManager;
@@ -68,6 +155,57 @@ static atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
+
+static void toggleAllGroups()
+{
+	bool anyActive = false;
+	for (const auto& group : g_toggleGroups)
+	{
+		if (group.isActive())
+		{
+			anyActive = true;
+			break;
+		}
+	}
+
+	if (anyActive)
+	{
+		g_savedGroupStates.clear();
+		for (auto& group : g_toggleGroups)
+		{
+			g_savedGroupStates.push_back(group.isActive());
+			if (group.isActive())
+			{
+				group.toggleActive();
+			}
+		}
+		g_allGroupsDisabledByMaster = true;
+	}
+	else
+	{
+		if (g_allGroupsDisabledByMaster && g_savedGroupStates.size() == g_toggleGroups.size())
+		{
+			for (size_t i = 0; i < g_toggleGroups.size(); ++i)
+			{
+				if (g_savedGroupStates[i] && !g_toggleGroups[i].isActive())
+				{
+					g_toggleGroups[i].toggleActive();
+				}
+			}
+		}
+		else
+		{
+			for (auto& group : g_toggleGroups)
+			{
+				if (!group.isActive())
+				{
+					group.toggleActive();
+				}
+			}
+		}
+		g_allGroupsDisabledByMaster = false;
+	}
+}
 
 /// <summary>
 /// Calculates a crc32 hash from the passed in shader bytecode. The hash is used to identity the shader in future runs.
@@ -102,13 +240,37 @@ void addDefaultGroup()
 /// </summary>
 void loadShaderTogglerIniFile()
 {
-	// Will assume it's started at the start of the application and therefore no groups are present.
+	initHuntingKeysDefaults();
+	g_toggleGroups.clear();
+
 	CDataFile iniFile;
 	if(!iniFile.Load(g_iniFileName))
 	{
-		// not there
+		addDefaultGroup();
 		return;
 	}
+
+	// Load master toggle key
+	const uint32_t masterKeyVal = iniFile.GetUInt("MasterToggleKey", "General");
+	if(masterKeyVal != UINT_MAX && masterKeyVal != 0)
+	{
+		g_masterToggleKey.setKeyFromIniFile(masterKeyVal);
+	}
+	else
+	{
+		g_masterToggleKey.clear();
+	}
+
+	// Load hunting keys
+	for(int i = 0; i < 9; ++i)
+	{
+		const uint32_t keyVal = iniFile.GetUInt(s_huntingKeyIniNames[i], "HuntingKeys");
+		if(keyVal != UINT_MAX && keyVal != 0)
+		{
+			g_huntingKeys[i].setKeyFromIniFile(keyVal);
+		}
+	}
+
 	int groupCounter = 0;
 	const int numberOfGroups = iniFile.GetInt("AmountGroups", "General");
 	if(numberOfGroups==INT_MIN)
@@ -140,7 +302,13 @@ void saveShaderTogglerIniFile()
 	// format: first section with # of groups, then per group a section with pixel and vertex shaders, as well as their name and key value.
 	// groups are stored with "Group" + group counter, starting with 0.
 	CDataFile iniFile;
-	iniFile.SetInt("AmountGroups", g_toggleGroups.size(), "",  "General");
+	iniFile.SetInt("AmountGroups", static_cast<int>(g_toggleGroups.size()), "",  "General");
+	iniFile.SetUInt("MasterToggleKey", g_masterToggleKey.getKeyForIniFile(), "", "General");
+
+	for(int i = 0; i < 9; ++i)
+	{
+		iniFile.SetUInt(s_huntingKeyIniNames[i], g_huntingKeys[i].getKeyForIniFile(), "", "HuntingKeys");
+	}
 
 	int groupCounter = 0;
 	for(const auto& group: g_toggleGroups)
@@ -448,6 +616,12 @@ static void onReshadePresent(effect_runtime* runtime)
 		--g_activeCollectorFrameCounter;
 	}
 
+	// Check master toggle key
+	if(g_masterToggleKey.isValid() && g_masterToggleKey.isKeyPressed(runtime))
+	{
+		toggleAllGroups();
+	}
+
 	for(auto& group: g_toggleGroups)
 	{
 		if(group.isToggleKeyPressed(runtime))
@@ -463,50 +637,49 @@ static void onReshadePresent(effect_runtime* runtime)
 		}
 	}
 
-	// hardcoded hunting keys.
-	// If Ctrl is pressed too, it'll step to the next marked shader (if any)
-	// Numpad 1: previous pixel shader
-	// Numpad 2: next pixel shader
-	// Numpad 3: mark current pixel shader as part of the toggle group
-	// Numpad 4: previous vertex shader
-	// Numpad 5: next vertex shader
-	// Numpad 6: mark current vertex shader as part of the toggle group
-	// Numpad 7: previous compute shader
-	// Numpad 8: next compute shader
-	// Numpad 9: mark current compute shader as part of the toggle group
-	if(runtime->is_key_pressed(VK_NUMPAD1))
+	// Hunting keys (configurable, defaults to Numpad 1-9).
+	// Next/Previous keys support holding down for continuous scrolling.
+	// If Ctrl is pressed, Next/Previous steps to the next marked shader.
+	const bool ctrlPressed = runtime->is_key_down(VK_CONTROL);
+
+	// Pixel shaders
+	if(g_repeatTrackers[0].check(g_huntingKeys[0].isKeyDown(runtime), g_huntingKeys[0].isKeyPressed(runtime)))
 	{
-		g_pixelShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
+		g_pixelShaderManager.huntPreviousShader(ctrlPressed);
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD2))
+	if(g_repeatTrackers[1].check(g_huntingKeys[1].isKeyDown(runtime), g_huntingKeys[1].isKeyPressed(runtime)))
 	{
-		g_pixelShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
+		g_pixelShaderManager.huntNextShader(ctrlPressed);
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD3))
+	if(g_huntingKeys[2].isKeyPressed(runtime))
 	{
 		g_pixelShaderManager.toggleMarkOnHuntedShader();
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD4))
+
+	// Vertex shaders
+	if(g_repeatTrackers[2].check(g_huntingKeys[3].isKeyDown(runtime), g_huntingKeys[3].isKeyPressed(runtime)))
 	{
-		g_vertexShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
+		g_vertexShaderManager.huntPreviousShader(ctrlPressed);
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD5))
+	if(g_repeatTrackers[3].check(g_huntingKeys[4].isKeyDown(runtime), g_huntingKeys[4].isKeyPressed(runtime)))
 	{
-		g_vertexShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
+		g_vertexShaderManager.huntNextShader(ctrlPressed);
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD6))
+	if(g_huntingKeys[5].isKeyPressed(runtime))
 	{
 		g_vertexShaderManager.toggleMarkOnHuntedShader();
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD7))
+
+	// Compute shaders
+	if(g_repeatTrackers[4].check(g_huntingKeys[6].isKeyDown(runtime), g_huntingKeys[6].isKeyPressed(runtime)))
 	{
-		g_computeShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
+		g_computeShaderManager.huntPreviousShader(ctrlPressed);
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD8))
+	if(g_repeatTrackers[5].check(g_huntingKeys[7].isKeyDown(runtime), g_huntingKeys[7].isKeyPressed(runtime)))
 	{
-		g_computeShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
+		g_computeShaderManager.huntNextShader(ctrlPressed);
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD9))
+	if(g_huntingKeys[8].isKeyPressed(runtime))
 	{
 		g_computeShaderManager.toggleMarkOnHuntedShader();
 	}
@@ -606,7 +779,7 @@ static void showHelpMarker(const char* desc)
 
 static void displaySettings(reshade::api::effect_runtime* runtime)
 {
-	if(g_toggleGroupIdKeyBindingEditing >= 0)
+	if(g_toggleGroupIdKeyBindingEditing >= 0 || g_isMasterKeyEditing || g_huntingKeyEditingIndex >= 0)
 	{
 		// a keybinding is being edited. Read current pressed keys into the collector, cumulatively;
 		g_keyCollector.collectKeysPressed(runtime);
@@ -615,19 +788,13 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if(ImGui::CollapsingHeader("General info and help"))
 	{
 		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("The Shader Toggler allows you to create one or more groups with shaders to toggle on/off. You can assign a keyboard shortcut (including using keys like Shift, Alt and Control) to each group, including a handy name. Each group can have one or more vertex or pixel shaders assigned to it. When you press the assigned keyboard shortcut, any draw calls using these shaders will be disabled, effectively hiding the elements in the 3D scene.");
-		ImGui::TextUnformatted("\nThe following (hardcoded) keyboard shortcuts are used when you click a group's 'Change Shaders' button:");
-		ImGui::TextUnformatted("* Numpad 1 and Numpad 2: previous/next pixel shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 1 and Ctrl + Numpad 2: previous/next marked pixel shader in the group");
-		ImGui::TextUnformatted("* Numpad 3: mark/unmark the current pixel shader as being part of the group");
-		ImGui::TextUnformatted("* Numpad 4 and Numpad 5: previous/next vertex shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 4 and Ctrl + Numpad 5: previous/next marked vertex shader in the group");
-		ImGui::TextUnformatted("* Numpad 6: mark/unmark the current vertex shader as being part of the group");
-		ImGui::TextUnformatted("* Numpad 7 and Numpad 8: previous/next compute shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 7 and Ctrl + Numpad 8: previous/next marked compute shader in the group");
-		ImGui::TextUnformatted("* Numpad 9: mark/unmark the current compute shader as being part of the group");
+		ImGui::TextUnformatted("The Shader Toggler allows you to create one or more groups with shaders to toggle on/off. You can assign a keyboard shortcut (including using keys like Shift, Alt and Control) to each group, including a handy name. Each group can have one or more vertex, pixel or compute shaders assigned to it. When you press the assigned keyboard shortcut, any draw calls using these shaders will be disabled, effectively hiding the elements in the 3D scene.");
+		ImGui::TextUnformatted("\nYou can customize the hunting keys below to fit your keyboard (including laptops and Tenkeyless/TKL keyboards). Holding down the previous/next keys will scroll continuously through shaders.");
+		ImGui::TextUnformatted("* Previous/Next shader keys: step through all collected shaders");
+		ImGui::TextUnformatted("* Ctrl + Previous/Next shader keys: step through ONLY the marked shaders in the group");
+		ImGui::TextUnformatted("* Mark/Unmark shader keys: mark or unmark the current shader as part of the group");
 		ImGui::TextUnformatted("\nWhen you step through the shaders, the current shader is disabled in the 3D scene so you can see if that's the shader you were looking for.");
-		ImGui::TextUnformatted("When you're done, make sure you click 'Save all toggle groups' to preserve the groups you defined so next time you start your game they're loaded in and you can use them right away.");
+		ImGui::TextUnformatted("When you're done, make sure you click 'Save all toggle groups' to preserve your settings in the INI file.");
 		ImGui::PopTextWrapPos();
 	}
 
@@ -645,8 +812,127 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	}
 	ImGui::Separator();
 
+	if(ImGui::CollapsingHeader("Hunting keyboard shortcuts"))
+	{
+		ImGui::PushTextWrapPos();
+		ImGui::TextUnformatted("Configure shortcuts used to step through and mark shaders while in 'Change shaders' hunting mode. Holding previous/next keys will scroll continuously through shaders.");
+		ImGui::PopTextWrapPos();
+		ImGui::Separator();
+
+		for(int i = 0; i < 9; ++i)
+		{
+			ImGui::PushID(2000 + i);
+			ImGui::AlignTextToFramePadding();
+			ImGui::Text("%-30s", s_huntingKeyLabels[i]);
+			ImGui::SameLine(ImGui::GetWindowWidth() * 0.40f);
+			ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.35f);
+
+			std::string keyText = (g_huntingKeyEditingIndex == i) ? g_keyCollector.getKeyAsString() : g_huntingKeys[i].getKeyAsString();
+			ImGui::InputText("##HuntingKey", (char*)keyText.c_str(), keyText.size(), ImGuiInputTextFlags_ReadOnly);
+			if(ImGui::IsItemClicked())
+			{
+				g_toggleGroupIdKeyBindingEditing = -1;
+				g_isMasterKeyEditing = false;
+				g_huntingKeyEditingIndex = i;
+				g_keyCollector.clear();
+			}
+			ImGui::PopItemWidth();
+
+			if(g_huntingKeyEditingIndex == i)
+			{
+				ImGui::SameLine();
+				if(ImGui::Button("OK"))
+				{
+					if(g_keyCollector.isValid())
+					{
+						g_huntingKeys[i] = g_keyCollector;
+					}
+					g_huntingKeyEditingIndex = -1;
+					g_keyCollector.clear();
+				}
+				ImGui::SameLine();
+				if(ImGui::Button("Cancel"))
+				{
+					g_huntingKeyEditingIndex = -1;
+					g_keyCollector.clear();
+				}
+			}
+			ImGui::PopID();
+		}
+
+		if(ImGui::Button("Reset Hunting Keys to Defaults (Numpad 1-9)"))
+		{
+			initHuntingKeysDefaults();
+			g_huntingKeyEditingIndex = -1;
+			g_keyCollector.clear();
+		}
+	}
+	ImGui::Separator();
+
 	if(ImGui::CollapsingHeader("List of Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
 	{
+		// Master toggle key
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("Master Toggle Key");
+		ImGui::SameLine();
+		showHelpMarker("Pressing this key toggles all groups off or restores their states. Leave empty if not needed.");
+		ImGui::SameLine(ImGui::GetWindowWidth() * 0.40f);
+		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.35f);
+
+		std::string masterKeyText = g_isMasterKeyEditing ? g_keyCollector.getKeyAsString() : g_masterToggleKey.getKeyAsString();
+		ImGui::InputText("##MasterToggleKey", (char*)masterKeyText.c_str(), masterKeyText.size(), ImGuiInputTextFlags_ReadOnly);
+		if(ImGui::IsItemClicked())
+		{
+			g_toggleGroupIdKeyBindingEditing = -1;
+			g_huntingKeyEditingIndex = -1;
+			g_isMasterKeyEditing = true;
+			g_keyCollector.clear();
+		}
+		ImGui::PopItemWidth();
+
+		if(g_isMasterKeyEditing)
+		{
+			ImGui::SameLine();
+			if(ImGui::Button("OK##Master"))
+			{
+				if(g_keyCollector.isValid())
+				{
+					g_masterToggleKey = g_keyCollector;
+				}
+				g_isMasterKeyEditing = false;
+				g_keyCollector.clear();
+			}
+			ImGui::SameLine();
+			if(ImGui::Button("Cancel##Master"))
+			{
+				g_isMasterKeyEditing = false;
+				g_keyCollector.clear();
+			}
+			ImGui::SameLine();
+			if(ImGui::Button("Clear##Master"))
+			{
+				g_masterToggleKey.clear();
+				g_isMasterKeyEditing = false;
+				g_keyCollector.clear();
+			}
+		}
+		else if(g_masterToggleKey.isValid())
+		{
+			ImGui::SameLine();
+			if(ImGui::Button("Clear##Master"))
+			{
+				g_masterToggleKey.clear();
+			}
+		}
+
+		ImGui::SameLine();
+		if(ImGui::Button("Toggle All Groups Now"))
+		{
+			toggleAllGroups();
+		}
+
+		ImGui::Separator();
+
 		if(ImGui::Button(" New "))
 		{
 			addDefaultGroup();
@@ -695,12 +981,19 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					startShaderEditing(group);
 				}
 			}
+
 			ImGui::SameLine();
-			ImGui::Text(" %s (%s%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str(), group.isActive() ? ", is active" : "");
+			bool groupIsActive = group.isActive();
+			if(ImGui::Checkbox("##GroupActiveToggle", &groupIsActive))
+			{
+				group.toggleActive();
+			}
+			ImGui::SameLine();
+			ImGui::Text("%s (%s%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str(), group.isInverted() ? ", inverted" : "");
 			if(group.isActiveAtStartup())
 			{
 				ImGui::SameLine();
-				ImGui::Text(" (Active at startup)");
+				ImGui::Text("(Active at startup)");
 			}
 			if(group.isEditing())
 			{
@@ -756,6 +1049,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				group.setIsActiveAtStartup(isDefaultActive);
 				ImGui::PopItemWidth();
 
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				bool isInverted = group.isInverted();
+				ImGui::Checkbox("Invert selection (hide all OTHER shaders)", &isInverted);
+				group.setIsInverted(isInverted);
+				ImGui::PopItemWidth();
+
 				if(!isKeyEditing)
 				{
 					if(ImGui::Button("OK"))
@@ -774,6 +1075,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		{
 			// switch off keybinding editing or shader editing, if in progress
 			g_toggleGroupIdKeyBindingEditing = -1;
+			g_isMasterKeyEditing = false;
+			g_huntingKeyEditingIndex = -1;
 			g_keyCollector.clear();
 			g_toggleGroupIdShaderEditing = -1;
 			g_pixelShaderManager.stopHuntingMode();
@@ -785,6 +1088,27 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		}
 
 		ImGui::Separator();
+		std::string iniNameOnly = std::filesystem::path(g_iniFileName).filename().string();
+		ImGui::Text("Active INI Profile: %s", iniNameOnly.c_str());
+		if(g_iniFileName == g_defaultIniFileName && !g_gameSpecificIniFileName.empty())
+		{
+			ImGui::SameLine();
+			if(ImGui::Button("Switch to Game-Specific INI"))
+			{
+				g_iniFileName = g_gameSpecificIniFileName;
+				loadShaderTogglerIniFile();
+			}
+		}
+		else if(g_iniFileName == g_gameSpecificIniFileName)
+		{
+			ImGui::SameLine();
+			if(ImGui::Button("Switch to Default INI"))
+			{
+				g_iniFileName = g_defaultIniFileName;
+				loadShaderTogglerIniFile();
+			}
+		}
+
 		if(g_toggleGroups.size() > 0)
 		{
 			if(ImGui::Button("Save all Toggle Groups"))
@@ -810,10 +1134,22 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			// We'll pass a nullptr for the module handle so we get the containing process' executable + path. We can't use the reshade's api as we don't have the runtime
 			// and we can't use reshade's handle because under vulkan reshade is stored in a central space and therefore it won't get the folder of the exe (where the reshade dll is located as well).
 			WCHAR buf[MAX_PATH];
-			const std::filesystem::path dllPath = GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) ? buf : std::filesystem::path();		// <installpath>/shadertoggler.addon64
-			const std::filesystem::path basePath = dllPath.parent_path();																// <installpath>
-			const std::string& hashFileName = HASH_FILE_NAME;
-			g_iniFileName = (basePath / hashFileName).string();																			// <installpath>/shadertoggler.ini
+			const std::filesystem::path dllPath = GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) ? buf : std::filesystem::path();
+			const std::filesystem::path basePath = dllPath.parent_path();
+			const std::string exeStem = dllPath.stem().string();
+
+			g_defaultIniFileName = (basePath / HASH_FILE_NAME).string();
+			g_gameSpecificIniFileName = (basePath / ("ShaderToggler." + exeStem + ".ini")).string();
+
+			if(std::filesystem::exists(g_gameSpecificIniFileName))
+			{
+				g_iniFileName = g_gameSpecificIniFileName;
+			}
+			else
+			{
+				g_iniFileName = g_defaultIniFileName;
+			}
+
 			reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 			reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 			reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);

@@ -69,14 +69,16 @@ namespace ShaderToggler
 
 		void toggleActive() { _isActive = !_isActive;}
 		void setIsActiveAtStartup(bool newValue) { _isActiveAtStartup = newValue; }
+		void setIsInverted(bool newValue) { _isInverted = newValue; }
 		void setEditing(bool isEditing) { _isEditing = isEditing;}
 
 		std::string getToggleKeyAsString() { return _keyData.getKeyAsString();}
 		uint8_t getToggleKey() { return _keyData.getKeyCode();}
-		std::string getName() { return _name;}
-		bool isActiveAtStartup() { return _isActiveAtStartup; }
-		bool isActive() { return _isActive;}
-		bool isEditing() { return _isEditing;}
+		std::string getName() const { return _name;}
+		bool isActiveAtStartup() const { return _isActiveAtStartup; }
+		bool isInverted() const { return _isInverted; }
+		bool isActive() const { return _isActive;}
+		bool isEditing() const { return _isEditing;}
 		bool isEmpty() const { return _vertexShaderHashes.size() <= 0 && _pixelShaderHashes.size() <= 0 && _computeShaderHashes.size() <= 0; }
 		int getId() const { return _id; }
 		std::unordered_set<uint32_t> getPixelShaderHashes() const { return _pixelShaderHashes;}
@@ -99,5 +101,6 @@ namespace ShaderToggler
 		bool _isActive;				// true means the group is actively toggled (so the hashes have to be hidden).
 		bool _isEditing;			// true means the group is actively edited (name, key)
 		bool _isActiveAtStartup;	// true means the group is active when the host game is started and the toggler has loaded the groups.
+		bool _isInverted;			// true means the group inverts the selection (blocks shaders not in the group)
 	};
 }

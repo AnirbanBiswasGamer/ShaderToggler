@@ -71,6 +71,7 @@ namespace ShaderToggler
 		/// <param name="runtime"></param>
 		/// <returns></returns>
 		bool isKeyPressed(const reshade::api::effect_runtime* runtime);
+		bool isKeyDown(const reshade::api::effect_runtime* runtime);
 
 		/// <summary>
 		/// Returns a usable description for the keyboard shortcut, or 'Press a key' if undefined/empty
