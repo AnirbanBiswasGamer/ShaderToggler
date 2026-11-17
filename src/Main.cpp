@@ -222,6 +222,7 @@ static std::unordered_set<uint32_t> g_activeBlockedPixelHashes;
 static std::unordered_set<uint32_t> g_activeBlockedVertexHashes;
 static std::unordered_set<uint32_t> g_activeBlockedComputeHashes;
 static std::vector<const ToggleGroup*> g_activeInvertedGroups;
+static std::vector<const ToggleGroup*> g_activeMatchBothGroups;
 static std::shared_mutex g_activeBlockedHashesMutex;
 static std::atomic<bool> g_hasActiveBlockedShaders = false;
 
@@ -232,6 +233,7 @@ static void rebuildActiveBlockedShaderHashesCache()
 	g_activeBlockedVertexHashes.clear();
 	g_activeBlockedComputeHashes.clear();
 	g_activeInvertedGroups.clear();
+	g_activeMatchBothGroups.clear();
 
 	for(const auto& group : g_toggleGroups)
 	{
@@ -242,6 +244,10 @@ static void rebuildActiveBlockedShaderHashesCache()
 		if(group.isInverted())
 		{
 			g_activeInvertedGroups.push_back(&group);
+		}
+		else if(group.isMatchBothShaders() && !group.getPixelShaderHashes().empty() && !group.getVertexShaderHashes().empty())
+		{
+			g_activeMatchBothGroups.push_back(&group);
 		}
 		else
 		{
@@ -262,7 +268,8 @@ static void rebuildActiveBlockedShaderHashesCache()
 	g_hasActiveBlockedShaders = !g_activeBlockedPixelHashes.empty() ||
 	                            !g_activeBlockedVertexHashes.empty() ||
 	                            !g_activeBlockedComputeHashes.empty() ||
-	                            !g_activeInvertedGroups.empty();
+	                            !g_activeInvertedGroups.empty() ||
+	                            !g_activeMatchBothGroups.empty();
 }
 
 static void toggleAllGroups()
@@ -980,6 +987,26 @@ bool blockDrawCallForCommandList(command_list* commandList)
 
 	std::shared_lock lock(g_activeBlockedHashesMutex);
 
+	// Check Match-Both groups (requires BOTH Vertex and Pixel shader to match in the same draw call)
+	if(!g_activeMatchBothGroups.empty())
+	{
+		const uint32_t psHash = (commandListData.activePixelShaderPipeline != 0) ?
+			g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline) : 0;
+		const uint32_t vsHash = (commandListData.activeVertexShaderPipeline != 0) ?
+			g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline) : 0;
+
+		if(psHash != 0 && vsHash != 0)
+		{
+			for(const auto* mbGroup : g_activeMatchBothGroups)
+			{
+				if(mbGroup->isBlockedPixelShader(psHash) && mbGroup->isBlockedVertexShader(vsHash))
+				{
+					return true;
+				}
+			}
+		}
+	}
+
 	// Check pixel shader
 	if(commandListData.activePixelShaderPipeline != 0)
 	{
@@ -1657,6 +1684,17 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				bool isInverted = group.isInverted();
 				ImGui::Checkbox("Invert selection (hide all OTHER shaders)", &isInverted);
 				group.setIsInverted(isInverted);
+				ImGui::PopItemWidth();
+
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				bool matchBoth = group.isMatchBothShaders();
+				if(ImGui::Checkbox("Match BOTH Vertex & Pixel shader (prevents hiding water/HUD)", &matchBoth))
+				{
+					group.setMatchBothShaders(matchBoth);
+					rebuildActiveBlockedShaderHashesCache();
+				}
 				ImGui::PopItemWidth();
 
 				// Toggle mode (Toggle, Hold, AutoHide)

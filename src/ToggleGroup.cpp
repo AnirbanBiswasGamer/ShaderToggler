@@ -36,7 +36,7 @@
 
 namespace ShaderToggler
 {
-	ToggleGroup::ToggleGroup(std::string name, int id): _id(id), _isActive(false), _isEditing(false), _isActiveAtStartup(false), _isInverted(false), _toggleMode(ToggleMode::Toggle), _autoHideDelaySeconds(3.0f)
+	ToggleGroup::ToggleGroup(std::string name, int id): _id(id), _isActive(false), _isEditing(false), _isActiveAtStartup(false), _isInverted(false), _matchBothShaders(false), _toggleMode(ToggleMode::Toggle), _autoHideDelaySeconds(3.0f)
 	{
 		_name = name.size() > 0 ? name : "Default";
 	}
@@ -203,6 +203,7 @@ namespace ShaderToggler
 		iniFile.SetUInt("ToggleKey", _keyData.getKeyForIniFile(), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", _isActiveAtStartup, "", sectionRoot);
 		iniFile.SetBool("IsInverted", _isInverted, "", sectionRoot);
+		iniFile.SetBool("MatchBothShaders", _matchBothShaders, "", sectionRoot);
 		iniFile.SetInt("ToggleMode", static_cast<int>(_toggleMode), "", sectionRoot);
 		iniFile.SetFloat("AutoHideDelay", _autoHideDelaySeconds, "", sectionRoot);
 	}
@@ -295,6 +296,7 @@ namespace ShaderToggler
 		}
 		_isActiveAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		_isInverted = iniFile.GetBool("IsInverted", sectionRoot);
+		_matchBothShaders = iniFile.GetBool("MatchBothShaders", sectionRoot);
 		const int modeVal = iniFile.GetInt("ToggleMode", sectionRoot);
 		if(modeVal != INT_MIN)
 		{

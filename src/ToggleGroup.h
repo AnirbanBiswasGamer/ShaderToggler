@@ -94,6 +94,7 @@ namespace ShaderToggler
 		}
 		void setIsActiveAtStartup(bool newValue) { _isActiveAtStartup = newValue; }
 		void setIsInverted(bool newValue) { _isInverted = newValue; }
+		void setMatchBothShaders(bool newValue) { _matchBothShaders = newValue; }
 		void setEditing(bool isEditing) { _isEditing = isEditing;}
 		void setToggleMode(ToggleMode mode) { _toggleMode = mode; }
 		void setAutoHideDelay(float seconds) { _autoHideDelaySeconds = seconds; }
@@ -121,6 +122,7 @@ namespace ShaderToggler
 		std::string getName() const { return _name;}
 		bool isActiveAtStartup() const { return _isActiveAtStartup; }
 		bool isInverted() const { return _isInverted; }
+		bool isMatchBothShaders() const { return _matchBothShaders; }
 		bool isActive() const { return _isActive;}
 		bool isEditing() const { return _isEditing;}
 		bool isEmpty() const { return _vertexShaderHashes.size() <= 0 && _pixelShaderHashes.size() <= 0 && _computeShaderHashes.size() <= 0; }
@@ -146,6 +148,7 @@ namespace ShaderToggler
 		bool _isEditing;			// true means the group is actively edited (name, key)
 		bool _isActiveAtStartup;	// true means the group is active when the host game is started and the toggler has loaded the groups.
 		bool _isInverted;			// true means the group inverts the selection (blocks shaders not in the group)
+		bool _matchBothShaders;		// true means only block if BOTH vertex and pixel shader match in the draw call
 		ToggleMode _toggleMode;
 		float _autoHideDelaySeconds;
 		std::chrono::steady_clock::time_point _activationTime;
