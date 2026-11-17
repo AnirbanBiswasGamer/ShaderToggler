@@ -466,10 +466,87 @@ static void onResetCommandList(command_list *commandList)
 
 static std::unordered_map<const void*, uint32_t> g_overrideCodeToOrigCrc;
 static std::shared_mutex g_overrideCodeMutex;
+static thread_local bool s_isApplyingLiveOverride = false;
+static std::unordered_map<uint64_t, pipeline> g_livePatchedPipelines;
+static std::shared_mutex g_livePatchedPipelinesMutex;
+
+static void invalidateLivePatchedPipelines(uint32_t shaderHash = 0)
+{
+	std::unique_lock lock(g_livePatchedPipelinesMutex);
+	if(shaderHash == 0)
+	{
+		g_livePatchedPipelines.clear();
+	}
+	else
+	{
+		for(auto it = g_livePatchedPipelines.begin(); it != g_livePatchedPipelines.end(); )
+		{
+			uint32_t hashFromKey = static_cast<uint32_t>(it->first >> 32);
+			if(hashFromKey == shaderHash)
+			{
+				it = g_livePatchedPipelines.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
+	}
+}
+
+static pipeline getOrCreateReplacementPipeline(device* dev, uint32_t shaderHash, pipeline_stage stage)
+{
+	if(dev == nullptr || shaderHash == 0)
+	{
+		return { 0 };
+	}
+
+	const uint64_t key = (static_cast<uint64_t>(shaderHash) << 32) ^ reinterpret_cast<uintptr_t>(dev);
+
+	{
+		std::shared_lock lock(g_livePatchedPipelinesMutex);
+		auto it = g_livePatchedPipelines.find(key);
+		if(it != g_livePatchedPipelines.end())
+		{
+			return it->second;
+		}
+	}
+
+	const auto* overrideCode = ShaderOverrideManager::getInstance().findOverride(shaderHash, 0, 0);
+	if(overrideCode == nullptr || overrideCode->empty())
+	{
+		return { 0 };
+	}
+
+	shader_desc desc{};
+	desc.code = overrideCode->data();
+	desc.code_size = overrideCode->size();
+
+	pipeline_subobject sub{};
+	sub.type = (stage == pipeline_stage::pixel_shader) ? pipeline_subobject_type::pixel_shader :
+	           (stage == pipeline_stage::vertex_shader) ? pipeline_subobject_type::vertex_shader :
+	           pipeline_subobject_type::compute_shader;
+	sub.count = 1;
+	sub.data = &desc;
+
+	pipeline repPipeline{ 0 };
+	s_isApplyingLiveOverride = true;
+	bool ok = dev->create_pipeline({ 0 }, 1, &sub, &repPipeline);
+	s_isApplyingLiveOverride = false;
+
+	if(ok && repPipeline.handle != 0)
+	{
+		std::unique_lock lock(g_livePatchedPipelinesMutex);
+		g_livePatchedPipelines[key] = repPipeline;
+		return repPipeline;
+	}
+
+	return { 0 };
+}
 
 static bool onCreatePipeline(device *device, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects)
 {
-	if(device == nullptr || subobjects == nullptr || subobjectCount == 0)
+	if(s_isApplyingLiveOverride || device == nullptr || subobjects == nullptr || subobjectCount == 0)
 	{
 		return false;
 	}
@@ -526,6 +603,10 @@ static bool onCreatePipeline(device *device, pipeline_layout, uint32_t subobject
 
 static void onInitPipeline(device *device, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
 {
+	if(s_isApplyingLiveOverride)
+	{
+		return;
+	}
 	// shader has been created, we will now create a hash and store it with the handle we got.
 	for (uint32_t i = 0; i < subobjectCount; ++i)
 	{
@@ -769,6 +850,7 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 				{
 					std::string msg;
 					ShaderPatcher::getInstance().revertPatch(currentHash, currentBasePath, msg);
+					invalidateLivePatchedPipelines(currentHash);
 					s_lastPatchedHash = currentHash;
 					s_lastPatchMsg = msg;
 				}
@@ -972,6 +1054,21 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 					g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
 				}
 				commandListData.activePixelShaderPipeline = pipelineHandle.handle;
+
+				if(ShaderOverrideManager::getInstance().isEnabled())
+				{
+					const uint32_t psHash = g_pixelShaderManager.getShaderHash(pipelineHandle.handle);
+					if(psHash != 0 && ShaderOverrideManager::getInstance().hasOverride(psHash, 0, 0))
+					{
+						pipeline repPipeline = getOrCreateReplacementPipeline(commandList->get_device(), psHash, pipeline_stage::pixel_shader);
+						if(repPipeline.handle != 0 && repPipeline.handle != pipelineHandle.handle)
+						{
+							s_isApplyingLiveOverride = true;
+							commandList->bind_pipeline(pipeline_stage::pixel_shader, repPipeline);
+							s_isApplyingLiveOverride = false;
+						}
+					}
+				}
 			}
 		}
 		if((stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader)
@@ -984,6 +1081,21 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 					g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
 				}
 				commandListData.activeVertexShaderPipeline = pipelineHandle.handle;
+
+				if(ShaderOverrideManager::getInstance().isEnabled())
+				{
+					const uint32_t vsHash = g_vertexShaderManager.getShaderHash(pipelineHandle.handle);
+					if(vsHash != 0 && ShaderOverrideManager::getInstance().hasOverride(vsHash, 0, 0))
+					{
+						pipeline repPipeline = getOrCreateReplacementPipeline(commandList->get_device(), vsHash, pipeline_stage::vertex_shader);
+						if(repPipeline.handle != 0 && repPipeline.handle != pipelineHandle.handle)
+						{
+							s_isApplyingLiveOverride = true;
+							commandList->bind_pipeline(pipeline_stage::vertex_shader, repPipeline);
+							s_isApplyingLiveOverride = false;
+						}
+					}
+				}
 			}
 		}
 		if((stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader)
@@ -1112,22 +1224,64 @@ bool blockDrawCallForCommandList(command_list* commandList)
 }
 
 
+static void applyLiveShaderOverrides(command_list* commandList)
+{
+	if(s_isApplyingLiveOverride || nullptr == commandList || !ShaderOverrideManager::getInstance().isEnabled())
+	{
+		return;
+	}
+
+	const CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
+
+	if(commandListData.activePixelShaderPipeline != 0)
+	{
+		const uint32_t psHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
+		if(psHash != 0 && ShaderOverrideManager::getInstance().hasOverride(psHash, 0, 0))
+		{
+			pipeline repPipeline = getOrCreateReplacementPipeline(commandList->get_device(), psHash, pipeline_stage::pixel_shader);
+			if(repPipeline.handle != 0)
+			{
+				s_isApplyingLiveOverride = true;
+				commandList->bind_pipeline(pipeline_stage::pixel_shader, repPipeline);
+				s_isApplyingLiveOverride = false;
+			}
+		}
+	}
+
+	if(commandListData.activeVertexShaderPipeline != 0)
+	{
+		const uint32_t vsHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
+		if(vsHash != 0 && ShaderOverrideManager::getInstance().hasOverride(vsHash, 0, 0))
+		{
+			pipeline repPipeline = getOrCreateReplacementPipeline(commandList->get_device(), vsHash, pipeline_stage::vertex_shader);
+			if(repPipeline.handle != 0)
+			{
+				s_isApplyingLiveOverride = true;
+				commandList->bind_pipeline(pipeline_stage::vertex_shader, repPipeline);
+				s_isApplyingLiveOverride = false;
+			}
+		}
+	}
+}
+
+
 static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
 {
-	// check if for this command list the active shader handles are part of the blocked set. If so, return true
+	applyLiveShaderOverrides(commandList);
 	return blockDrawCallForCommandList(commandList);
 }
 
 
 static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance)
 {
-	// same as onDraw
+	applyLiveShaderOverrides(commandList);
 	return blockDrawCallForCommandList(commandList);
 }
 
 
 static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command type, resource buffer, uint64_t offset, uint32_t draw_count, uint32_t stride)
 {
+	applyLiveShaderOverrides(commandList);
 	switch(type)
 	{
 		case indirect_command::unknown:
@@ -1471,6 +1625,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		if(ImGui::Button("Reload from ShaderFixes"))
 		{
 			ShaderOverrideManager::getInstance().reloadOverrides();
+			invalidateLivePatchedPipelines(0);
 		}
 		ImGui::SameLine();
 		if(ImGui::Button("Open ShaderFixes Folder"))
