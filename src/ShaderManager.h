@@ -67,14 +67,14 @@ namespace ShaderToggler
 		/// </summary>
 		/// <param name="ctrlPressed">If control is pressed as well, it'll step to the next marked shader (if any). If there aren't any shaders in that
 		///	situation, it'll stay on the current shader.</param>
-		void huntNextShader(bool ctrlPressed);
+		void huntNextShader(bool ctrlPressed, int stepCount = 1);
 		/// <summary>
 		/// Moves to the previous shader. If control is pressed as well, it'll step to the previous marked shader (if any). If there aren't any shaders in that
 		///	situation, it'll stay on the current shader.
 		/// </summary>
 		/// <param name="ctrlPressed">If control is pressed as well, it'll step to the previous marked shader (if any). If there aren't any shaders in that
 		///	situation, it'll stay on the current shader.</param>
-		void huntPreviousShader(bool ctrlPressed);
+		void huntPreviousShader(bool ctrlPressed, int stepCount = 1);
 		/// <summary>
 		/// Returns true if the shader hash passed in is the currently hunted shader or it's part of the marked shader hashes
 		/// </summary>

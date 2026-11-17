@@ -36,7 +36,7 @@
 
 namespace ShaderToggler
 {
-	ToggleGroup::ToggleGroup(std::string name, int id): _id(id), _isActive(false), _isEditing(false), _isActiveAtStartup(false), _isInverted(false)
+	ToggleGroup::ToggleGroup(std::string name, int id): _id(id), _isActive(false), _isEditing(false), _isActiveAtStartup(false), _isInverted(false), _toggleMode(ToggleMode::Toggle), _autoHideDelaySeconds(3.0f)
 	{
 		_name = name.size() > 0 ? name : "Default";
 	}
@@ -85,7 +85,7 @@ namespace ShaderToggler
 	}
 
 
-	bool ToggleGroup::isBlockedPixelShader(uint32_t shaderHash)
+	bool ToggleGroup::isBlockedPixelShader(uint32_t shaderHash) const
 	{
 		if(!_isActive || shaderHash == 0)
 		{
@@ -99,7 +99,7 @@ namespace ShaderToggler
 	}
 
 
-	bool ToggleGroup::isBlockedVertexShader(uint32_t shaderHash)
+	bool ToggleGroup::isBlockedVertexShader(uint32_t shaderHash) const
 	{
 		if(!_isActive || shaderHash == 0)
 		{
@@ -113,7 +113,7 @@ namespace ShaderToggler
 	}
 
 
-	bool ToggleGroup::isBlockedComputeShader(uint32_t shaderHash)
+	bool ToggleGroup::isBlockedComputeShader(uint32_t shaderHash) const
 	{
 		if(!_isActive || shaderHash == 0)
 		{
@@ -132,6 +132,29 @@ namespace ShaderToggler
 		_pixelShaderHashes.clear();
 		_vertexShaderHashes.clear();
 		_computeShaderHashes.clear();
+	}
+
+
+	void ToggleGroup::addShaderHash(uint32_t hash, int shaderType)
+	{
+		if(hash == 0)
+		{
+			return;
+		}
+		switch(shaderType)
+		{
+		case 0: // Pixel
+			_pixelShaderHashes.emplace(hash);
+			break;
+		case 1: // Vertex
+			_vertexShaderHashes.emplace(hash);
+			break;
+		case 2: // Compute
+			_computeShaderHashes.emplace(hash);
+			break;
+		default:
+			break;
+		}
 	}
 
 
@@ -180,6 +203,8 @@ namespace ShaderToggler
 		iniFile.SetUInt("ToggleKey", _keyData.getKeyForIniFile(), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", _isActiveAtStartup, "", sectionRoot);
 		iniFile.SetBool("IsInverted", _isInverted, "", sectionRoot);
+		iniFile.SetInt("ToggleMode", static_cast<int>(_toggleMode), "", sectionRoot);
+		iniFile.SetFloat("AutoHideDelay", _autoHideDelaySeconds, "", sectionRoot);
 	}
 
 
@@ -270,6 +295,16 @@ namespace ShaderToggler
 		}
 		_isActiveAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		_isInverted = iniFile.GetBool("IsInverted", sectionRoot);
+		const int modeVal = iniFile.GetInt("ToggleMode", sectionRoot);
+		if(modeVal != INT_MIN)
+		{
+			_toggleMode = static_cast<ToggleMode>(modeVal);
+		}
+		const float delayVal = iniFile.GetFloat("AutoHideDelay", sectionRoot);
+		if(delayVal > 0.0f)
+		{
+			_autoHideDelaySeconds = delayVal;
+		}
 		_isActive = _isActiveAtStartup;
 	}
 }

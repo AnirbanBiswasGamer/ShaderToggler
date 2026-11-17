@@ -33,12 +33,20 @@
 
 #include <string>
 #include <unordered_set>
+#include <chrono>
 
 #include "CDataFile.h"
 #include "KeyData.h"
 
 namespace ShaderToggler
 {
+	enum class ToggleMode : int
+	{
+		Toggle = 0,
+		Hold = 1,
+		AutoHide = 2
+	};
+
 	class ToggleGroup
 	{
 	public:
@@ -62,15 +70,51 @@ namespace ShaderToggler
 		/// <param name="groupCounter">if -1, the ini file is in the pre-1.0 format</param>
 		void loadState(CDataFile& iniFile, int groupCounter);
 		void storeCollectedHashes(const std::unordered_set<uint32_t> pixelShaderHashes, const std::unordered_set<uint32_t> vertexShaderHashes, const std::unordered_set<uint32_t> computeShaderHashes);
-		bool isBlockedPixelShader(uint32_t shaderHash);
-		bool isBlockedVertexShader(uint32_t shaderHash);
-		bool isBlockedComputeShader(uint32_t shaderHash);
+		bool isBlockedPixelShader(uint32_t shaderHash) const;
+		bool isBlockedVertexShader(uint32_t shaderHash) const;
+		bool isBlockedComputeShader(uint32_t shaderHash) const;
 		void clearHashes();
+		void addShaderHash(uint32_t hash, int shaderType);
 
-		void toggleActive() { _isActive = !_isActive;}
+		void toggleActive()
+		{
+			_isActive = !_isActive;
+			if (_isActive && _toggleMode == ToggleMode::AutoHide)
+			{
+				_activationTime = std::chrono::steady_clock::now();
+			}
+		}
+		void setActive(bool active)
+		{
+			_isActive = active;
+			if (_isActive && _toggleMode == ToggleMode::AutoHide)
+			{
+				_activationTime = std::chrono::steady_clock::now();
+			}
+		}
 		void setIsActiveAtStartup(bool newValue) { _isActiveAtStartup = newValue; }
 		void setIsInverted(bool newValue) { _isInverted = newValue; }
 		void setEditing(bool isEditing) { _isEditing = isEditing;}
+		void setToggleMode(ToggleMode mode) { _toggleMode = mode; }
+		void setAutoHideDelay(float seconds) { _autoHideDelaySeconds = seconds; }
+
+		ToggleMode getToggleMode() const { return _toggleMode; }
+		float getAutoHideDelay() const { return _autoHideDelaySeconds; }
+		bool isToggleKeyDown(const reshade::api::effect_runtime* runtime) { return _keyData.isKeyDown(runtime); }
+		bool checkAutoHideExpired()
+		{
+			if (_isActive && _toggleMode == ToggleMode::AutoHide)
+			{
+				auto now = std::chrono::steady_clock::now();
+				auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - _activationTime).count();
+				if (elapsedMs >= static_cast<int64_t>(_autoHideDelaySeconds * 1000.0f))
+				{
+					_isActive = false;
+					return true;
+				}
+			}
+			return false;
+		}
 
 		std::string getToggleKeyAsString() { return _keyData.getKeyAsString();}
 		uint8_t getToggleKey() { return _keyData.getKeyCode();}
@@ -81,9 +125,9 @@ namespace ShaderToggler
 		bool isEditing() const { return _isEditing;}
 		bool isEmpty() const { return _vertexShaderHashes.size() <= 0 && _pixelShaderHashes.size() <= 0 && _computeShaderHashes.size() <= 0; }
 		int getId() const { return _id; }
-		std::unordered_set<uint32_t> getPixelShaderHashes() const { return _pixelShaderHashes;}
-		std::unordered_set<uint32_t> getVertexShaderHashes() const { return _vertexShaderHashes;}
-		std::unordered_set<uint32_t> getComputeShaderHashes() const { return _computeShaderHashes; }
+		const std::unordered_set<uint32_t>& getPixelShaderHashes() const { return _pixelShaderHashes;}
+		const std::unordered_set<uint32_t>& getVertexShaderHashes() const { return _vertexShaderHashes;}
+		const std::unordered_set<uint32_t>& getComputeShaderHashes() const { return _computeShaderHashes; }
 		bool isToggleKeyPressed(const reshade::api::effect_runtime* runtime) { return _keyData.isKeyPressed(runtime);}
 		
 		bool operator==(const ToggleGroup& rhs)
@@ -102,5 +146,8 @@ namespace ShaderToggler
 		bool _isEditing;			// true means the group is actively edited (name, key)
 		bool _isActiveAtStartup;	// true means the group is active when the host game is started and the toggler has loaded the groups.
 		bool _isInverted;			// true means the group inverts the selection (blocks shaders not in the group)
+		ToggleMode _toggleMode;
+		float _autoHideDelaySeconds;
+		std::chrono::steady_clock::time_point _activationTime;
 	};
 }

@@ -51,7 +51,23 @@ Under the **Hunting keyboard shortcuts** header in the settings, all 9 hunting a
 - **Pixel Shaders:** Previous (default `Numpad 1`), Next (default `Numpad 2`), Mark/Unmark (default `Numpad 3`)
 - **Vertex Shaders:** Previous (default `Numpad 4`), Next (default `Numpad 5`), Mark/Unmark (default `Numpad 6`)
 - **Compute Shaders:** Previous (default `Numpad 7`), Next (default `Numpad 8`), Mark/Unmark (default `Numpad 9`)
+- Hold **Shift** while stepping to jump **10 shaders at a time** for fast scrolling through hundreds of shaders.
 - Click **Reset Hunting Keys to Defaults** at any time to restore the default Numpad layout.
+
+### Gamepad / Controller Support (XInput)
+Enable controller support in the settings to hunt and toggle without a keyboard:
+- **Master Toggle:** Press `LB` + `RB` + `D-Pad Down` at the same time to toggle all groups off or restore their prior state.
+- **Hunting Navigation:** In hunting mode, press `D-Pad Left` / `D-Pad Right` to step through shaders (hold `LB` or `RB` to jump by 10) and `D-Pad Up` to mark/unmark the active shader.
+
+### Toggle Modes: Hold & Auto-Hide Timer
+When editing a toggle group, you can choose from three behavior modes:
+1. **Standard Toggle:** Press key to toggle on/off.
+2. **Momentary Hold:** The group remains active only while holding the key down (great for binoculars, weapon aim, or peek-through HUD).
+3. **Auto-Hide Timer:** The group toggles on and automatically turns back off after a configurable delay (0.5 to 30 seconds).
+
+### Manual Hashes & Clipboard Export
+- **Copy Hashes to Clipboard:** Export all shader hashes in the group to the Windows clipboard formatted for easy sharing or manual INI backup.
+- **Add Hash Manually:** Directly add known hex hashes (`0x1A2B3C4D`) to Pixel, Vertex, or Compute slots without having to hunt for them in-game.
 
 ---
 
@@ -63,6 +79,15 @@ Under the **Hunting keyboard shortcuts** header in the settings, all 9 hunting a
 ---
 
 ## Changelog
+
+### v1.3.1
+- **Flat Hash Cache Architecture:** Aggregated active blocked shader hashes into a consolidated flat set with zero-cost early out, reducing draw call overhead to `O(1)` even in scenes with 5,000+ draw calls per frame.
+- **Shift + Navigation Fast Jump:** Hold `Shift` while pressing Previous or Next to jump 10 shaders at once.
+- **Overlay Hex Hash & 1-Based Indexing:** Hunting overlay now clearly displays the 1-based index and full 32-bit hex hash `(Hash: 0x%08X)`.
+- **Momentary Hold & Auto-Hide Timers:** Added configurable toggle modes per group: standard toggle, momentary hold-to-toggle, and auto-hide timer with custom duration.
+- **Manual Hash Adding & Clipboard Export:** Direct in-UI hex hash entry and 1-click clipboard copy of group shaders.
+- **Gamepad / Controller Support (XInput):** Dynamic XInput loading with master toggle combo (`LB+RB+DPad Down`) and controller hunting navigation.
+- **GitHub Actions CI:** Automated continuous integration building both x86 and x64 targets on every commit.
 
 ### v1.3.0
 - **x86 (32-bit) Full Modern Parity:** Complete 32-bit build (`ShaderToggler.addon32` / `ShaderToggler.addon`) supporting all modern features, Large Address Aware (`/LARGEADDRESSAWARE`), and optimized for DirectX 9, DirectX 11, OpenGL, and Vulkan.

@@ -116,7 +116,7 @@ namespace ShaderToggler
 	}
 
 
-	void ShaderManager::huntNextShader(bool ctrlPressed)
+	void ShaderManager::huntNextShader(bool ctrlPressed, int stepCount)
 	{
 		if(!_isInHuntingMode)
 		{
@@ -167,9 +167,14 @@ namespace ShaderToggler
 			// always done
 			return;
 		}
-		if(!_collectedActiveShaderHashes.empty() && static_cast<size_t>(_activeHuntedShaderIndex) < _collectedActiveShaderHashes.size() - 1)
+		if(!_collectedActiveShaderHashes.empty())
 		{
-			_activeHuntedShaderIndex++;
+			const int total = static_cast<int>(_collectedActiveShaderHashes.size());
+			_activeHuntedShaderIndex = (_activeHuntedShaderIndex + stepCount) % total;
+			if(_activeHuntedShaderIndex < 0)
+			{
+				_activeHuntedShaderIndex += total;
+			}
 		}
 		else
 		{
@@ -179,7 +184,7 @@ namespace ShaderToggler
 	}
 
 
-	void ShaderManager::huntPreviousShader(bool ctrlPressed)
+	void ShaderManager::huntPreviousShader(bool ctrlPressed, int stepCount)
 	{
 		if(!_isInHuntingMode)
 		{
@@ -231,13 +236,18 @@ namespace ShaderToggler
 			return;
 
 		}
-		if(_activeHuntedShaderIndex <= 0)
+		if(!_collectedActiveShaderHashes.empty())
 		{
-			_activeHuntedShaderIndex = static_cast<int>(_collectedActiveShaderHashes.size()) - 1;
+			const int total = static_cast<int>(_collectedActiveShaderHashes.size());
+			_activeHuntedShaderIndex = (_activeHuntedShaderIndex - stepCount) % total;
+			if(_activeHuntedShaderIndex < 0)
+			{
+				_activeHuntedShaderIndex += total;
+			}
 		}
 		else
 		{
-			--_activeHuntedShaderIndex;
+			_activeHuntedShaderIndex = 0;
 		}
 		setActiveHuntedShaderHandle();
 	}
