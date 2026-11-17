@@ -103,7 +103,7 @@ namespace ShaderToggler
 
 	void ShaderManager::setActiveHuntedShaderHandle()
 	{
-		if(_activeHuntedShaderIndex<0 || _collectedActiveShaderHashes.empty() || _activeHuntedShaderIndex >= _collectedActiveShaderHashes.size())
+		if(_activeHuntedShaderIndex < 0 || _collectedActiveShaderHashes.empty() || static_cast<size_t>(_activeHuntedShaderIndex) >= _collectedActiveShaderHashes.size())
 		{
 			_activeHuntedShaderHash = 0;
 			return;
@@ -167,7 +167,7 @@ namespace ShaderToggler
 			// always done
 			return;
 		}
-		if(_activeHuntedShaderIndex < _collectedActiveShaderHashes.size() - 1)
+		if(!_collectedActiveShaderHashes.empty() && static_cast<size_t>(_activeHuntedShaderIndex) < _collectedActiveShaderHashes.size() - 1)
 		{
 			_activeHuntedShaderIndex++;
 		}
@@ -210,7 +210,7 @@ namespace ShaderToggler
 				{
 					it = _collectedActiveShaderHashes.end();
 					--it;
-					index = _collectedActiveShaderHashes.size() - 1;
+					index = static_cast<int>(_collectedActiveShaderHashes.size()) - 1;
 				}
 				hash = *it;
 				if(_markedShaderHashes.count(hash) == 1)
@@ -233,7 +233,7 @@ namespace ShaderToggler
 		}
 		if(_activeHuntedShaderIndex <= 0)
 		{
-			_activeHuntedShaderIndex = _collectedActiveShaderHashes.size() - 1;
+			_activeHuntedShaderIndex = static_cast<int>(_collectedActiveShaderHashes.size()) - 1;
 		}
 		else
 		{
@@ -245,16 +245,22 @@ namespace ShaderToggler
 
 	bool ShaderManager::isBlockedShader(uint32_t shaderHash)
 	{
+		if(shaderHash == 0)
+		{
+			return false;
+		}
+
 		bool toReturn = false;
 		if(_isInHuntingMode)
 		{
 			// get the shader hash bound to this pipeline handle
-			toReturn |= shaderHash<=0 ? false : _activeHuntedShaderHash == shaderHash;
+			toReturn |= (_activeHuntedShaderHash == shaderHash);
 		}
 		if(_hideMarkedShaders)
 		{
 			// check if the shader hash is part of the toggle group
-			toReturn |= _markedShaderHashes.count(shaderHash)==1;
+			std::shared_lock lock(_markedShaderHashMutex);
+			toReturn |= (_markedShaderHashes.count(shaderHash) == 1);
 		}
 
 		return toReturn;
@@ -295,11 +301,17 @@ namespace ShaderToggler
 
 	uint32_t ShaderManager::getShaderHash(uint64_t handle)
 	{
-		std::unique_lock ulock(_hashHandlesMutex);
-		if(_handleToShaderHash.count(handle)!=1)
+		if(handle == 0)
 		{
 			return 0;
 		}
-		return _handleToShaderHash.at(handle);
+
+		std::shared_lock lock(_hashHandlesMutex);
+		const auto it = _handleToShaderHash.find(handle);
+		if(it != _handleToShaderHash.end())
+		{
+			return it->second;
+		}
+		return 0;
 	}
 }

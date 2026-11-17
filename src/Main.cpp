@@ -49,9 +49,9 @@ extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler";
 extern "C" __declspec(dllexport) const char *DESCRIPTION = "Add-on which allows you to define groups of game shaders to toggle on/off with one key press.";
 
 struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataContainer {
-    uint64_t activePixelShaderPipeline;
-    uint64_t activeVertexShaderPipeline;
-	uint64_t activeComputeShaderPipeline;
+    uint64_t activePixelShaderPipeline = 0;
+    uint64_t activeVertexShaderPipeline = 0;
+	uint64_t activeComputeShaderPipeline = 0;
 };
 
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250;
@@ -167,9 +167,9 @@ static void onDestroyCommandList(command_list *commandList)
 static void onResetCommandList(command_list *commandList)
 {
 	CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
-	commandListData.activePixelShaderPipeline = -1;
-	commandListData.activeVertexShaderPipeline = -1;
-	commandListData.activeComputeShaderPipeline = -1;
+	commandListData.activePixelShaderPipeline = 0;
+	commandListData.activeVertexShaderPipeline = 0;
+	commandListData.activeComputeShaderPipeline = 0;
 }
 
 
@@ -278,8 +278,27 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 
 static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
 {
-	if(nullptr != commandList && pipelineHandle.handle != 0)
+	if(nullptr != commandList)
 	{
+		CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+
+		if(pipelineHandle.handle == 0)
+		{
+			if((stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader)
+			{
+				commandListData.activePixelShaderPipeline = 0;
+			}
+			if((stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader)
+			{
+				commandListData.activeVertexShaderPipeline = 0;
+			}
+			if((stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader)
+			{
+				commandListData.activeComputeShaderPipeline = 0;
+			}
+			return;
+		}
+
 		const bool handleHasPixelShaderAttached = g_pixelShaderManager.isKnownHandle(pipelineHandle.handle);
 		const bool handleHasVertexShaderAttached = g_vertexShaderManager.isKnownHandle(pipelineHandle.handle);
 		const bool handleHasComputeShaderAttached = g_computeShaderManager.isKnownHandle(pipelineHandle.handle);
@@ -288,7 +307,6 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 			// draw call with unknown handle, don't collect it
 			return;
 		}
-		CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
 		// always do the following code as that has to run for every bind on a pipeline:
 		if(g_activeCollectorFrameCounter > 0)
 		{
@@ -414,6 +432,12 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 		// the rest aren't blocked
 	}
 	return false;
+}
+
+
+static bool onDispatch(command_list* commandList, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z)
+{
+	return blockDrawCallForCommandList(commandList);
 }
 
 
@@ -801,6 +825,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			reshade::register_event<reshade::addon_event::draw>(onDraw);
 			reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
 			reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+			reshade::register_event<reshade::addon_event::dispatch>(onDispatch);
 			reshade::register_overlay(nullptr, &displaySettings);
 			loadShaderTogglerIniFile();
 		}
@@ -814,6 +839,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::unregister_event<reshade::addon_event::draw>(onDraw);
 		reshade::unregister_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
 		reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+		reshade::unregister_event<reshade::addon_event::dispatch>(onDispatch);
 		reshade::unregister_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::unregister_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
 		reshade::unregister_event<reshade::addon_event::reset_command_list>(onResetCommandList);

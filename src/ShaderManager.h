@@ -90,9 +90,9 @@ namespace ShaderToggler
 		void addActivePipelineHandle(uint64_t handle);
 		void toggleMarkOnHuntedShader();
 
-		uint32_t getPipelineCount() {return _handleToShaderHash.size();}
-		uint32_t getShaderCount() { return _shaderHashes.size();}
-		uint32_t getAmountShaderHashesCollected() { return _collectedActiveShaderHashes.size(); }
+		uint32_t getPipelineCount() { return static_cast<uint32_t>(_handleToShaderHash.size()); }
+		uint32_t getShaderCount() { return static_cast<uint32_t>(_shaderHashes.size()); }
+		uint32_t getAmountShaderHashesCollected() { return static_cast<uint32_t>(_collectedActiveShaderHashes.size()); }
 		bool isInHuntingMode() { return _isInHuntingMode;}
 		uint32_t getActiveHuntedShaderHash() { return _activeHuntedShaderHash;}
 		int getActiveHuntedShaderIndex() { return _activeHuntedShaderIndex; }
@@ -113,11 +113,15 @@ namespace ShaderToggler
 		uint32_t getMarkedShaderCount()
 		{
 			std::shared_lock lock(_markedShaderHashMutex);
-			return _markedShaderHashes.size();
+			return static_cast<uint32_t>(_markedShaderHashes.size());
 		}
 
 		bool isKnownHandle(uint64_t pipelineHandle)
 		{
+			if(pipelineHandle == 0)
+			{
+				return false;
+			}
 			std::shared_lock lock(_hashHandlesMutex);
 			return _handleToShaderHash.count(pipelineHandle)==1;
 		}
