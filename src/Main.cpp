@@ -1304,6 +1304,19 @@ static bool onDispatch(command_list* commandList, uint32_t group_count_x, uint32
 
 static void onReshadePresent(effect_runtime* runtime)
 {
+	static bool s_overridesInitialized = false;
+	if(!s_overridesInitialized)
+	{
+		s_overridesInitialized = true;
+		WCHAR buf[MAX_PATH];
+		if(GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)))
+		{
+			std::filesystem::path basePath = std::filesystem::path(buf).parent_path();
+			ShaderOverrideManager::getInstance().init(basePath);
+			ShaderOverrideManager::getInstance().reloadOverrides();
+		}
+	}
+
 	if(g_activeCollectorFrameCounter>0)
 	{
 		--g_activeCollectorFrameCounter;
@@ -2111,8 +2124,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 				g_iniFileName = g_defaultIniFileName;
 			}
 
-			ShaderOverrideManager::getInstance().init(basePath);
-			reshade::register_event<reshade::addon_event::create_pipeline>(onCreatePipeline);
 			reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 			reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 			reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
@@ -2142,7 +2153,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		}
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
-		reshade::unregister_event<reshade::addon_event::create_pipeline>(onCreatePipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 		reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
 		reshade::unregister_event<reshade::addon_event::bind_pipeline>(onBindPipeline);

@@ -52,6 +52,7 @@ namespace ShaderToggler
 		std::filesystem::path _basePath;
 		std::filesystem::path _fixesPath;
 		bool _initialized = false;
+		bool _loaded = false;
 		bool _enabled = true;
 
 		std::unordered_map<uint32_t, std::vector<uint8_t>> _overridesByCrc32;

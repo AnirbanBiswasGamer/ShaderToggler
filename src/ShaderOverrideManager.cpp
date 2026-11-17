@@ -90,15 +90,6 @@ namespace ShaderToggler
 	{
 		_basePath = basePath;
 		_fixesPath = basePath / "ShaderFixes";
-
-		std::error_code ec;
-		if(!std::filesystem::exists(_fixesPath, ec))
-		{
-			std::filesystem::create_directories(_fixesPath, ec);
-		}
-
-		initCompiler();
-		reloadOverrides();
 		_initialized = true;
 	}
 
@@ -112,6 +103,7 @@ namespace ShaderToggler
 		std::error_code ec;
 		if(!std::filesystem::exists(_fixesPath, ec))
 		{
+			_loaded = true;
 			return;
 		}
 
@@ -122,6 +114,7 @@ namespace ShaderToggler
 				loadFileOverride(entry.path());
 			}
 		}
+		_loaded = true;
 	}
 
 	bool ShaderOverrideManager::compileHLSL(const std::string& hlslCode, const std::string& sourceName,
@@ -302,6 +295,10 @@ namespace ShaderToggler
 
 	const std::vector<uint8_t>* ShaderOverrideManager::findOverride(uint32_t crc32, uint64_t fnv1, uint64_t fnv1a)
 	{
+		if(!_loaded)
+		{
+			reloadOverrides();
+		}
 		std::shared_lock lock(_overrideMutex);
 
 		if(crc32 != 0)
