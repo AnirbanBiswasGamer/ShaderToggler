@@ -31,12 +31,14 @@
 /////////////////////////////////////////////////////////////////////////
 
 #include "ShaderManager.h"
+#include "ShaderAnalyzer.h"
+#include <algorithm>
 
 using namespace reshade::api;
 
 namespace ShaderToggler
 {
-	ShaderManager::ShaderManager(): _activeHuntedShaderHash(0)
+	ShaderManager::ShaderManager(): _activeHuntedShaderHash(0), _heuristicFilter(0), _shaderType(0)
 	{
 	}
 
@@ -82,9 +84,11 @@ namespace ShaderToggler
 		_isInHuntingMode = true;
 		_activeHuntedShaderIndex = -1;
 		_activeHuntedShaderHash = 0;
+		_heuristicFilter = 0;
 		{
 			std::unique_lock lock(_collectedActiveHandlesMutex);
 			_collectedActiveShaderHashes.clear();			// clear it so we start with a clean slate
+			_filteredHuntedShaderHashes.clear();
 		}
 	}
 
@@ -94,6 +98,11 @@ namespace ShaderToggler
 		_isInHuntingMode = false;
 		_activeHuntedShaderIndex = -1;
 		_activeHuntedShaderHash = 0;
+		_heuristicFilter = 0;
+		{
+			std::unique_lock lock(_collectedActiveHandlesMutex);
+			_filteredHuntedShaderHashes.clear();
+		}
 		{
 			std::unique_lock lock(_markedShaderHashMutex);
 			_markedShaderHashes.clear();
@@ -101,18 +110,96 @@ namespace ShaderToggler
 	}
 
 
+	uint32_t ShaderManager::getAmountShaderHashesCollected()
+	{
+		std::shared_lock lock(_collectedActiveHandlesMutex);
+		return static_cast<uint32_t>(_filteredHuntedShaderHashes.size());
+	}
+
+
+	uint32_t ShaderManager::getTotalRawHashesCollected()
+	{
+		std::shared_lock lock(_collectedActiveHandlesMutex);
+		return static_cast<uint32_t>(_collectedActiveShaderHashes.size());
+	}
+
+
+	void ShaderManager::setHeuristicFilter(int categoryFlag)
+	{
+		_heuristicFilter = categoryFlag;
+		rebuildFilteredHashes();
+	}
+
+
+	int ShaderManager::getHeuristicCandidateCount(int categoryFlag)
+	{
+		std::shared_lock lock(_collectedActiveHandlesMutex);
+		if(categoryFlag == 0)
+		{
+			return static_cast<int>(_collectedActiveShaderHashes.size());
+		}
+		int count = 0;
+		for(const auto hash : _collectedActiveShaderHashes)
+		{
+			if(ShaderAnalyzer::getInstance().getCategoryFlags(hash, _shaderType) & categoryFlag)
+			{
+				count++;
+			}
+		}
+		return count;
+	}
+
+
+	void ShaderManager::rebuildFilteredHashes()
+	{
+		std::unique_lock lock(_collectedActiveHandlesMutex);
+		_filteredHuntedShaderHashes.clear();
+
+		for(const auto hash : _collectedActiveShaderHashes)
+		{
+			if(_heuristicFilter == 0)
+			{
+				_filteredHuntedShaderHashes.push_back(hash);
+			}
+			else
+			{
+				if(ShaderAnalyzer::getInstance().getCategoryFlags(hash, _shaderType) & _heuristicFilter)
+				{
+					_filteredHuntedShaderHashes.push_back(hash);
+				}
+			}
+		}
+
+		if(_filteredHuntedShaderHashes.empty())
+		{
+			_activeHuntedShaderIndex = -1;
+			_activeHuntedShaderHash = 0;
+		}
+		else
+		{
+			auto it = std::find(_filteredHuntedShaderHashes.begin(), _filteredHuntedShaderHashes.end(), _activeHuntedShaderHash);
+			if(it != _filteredHuntedShaderHashes.end())
+			{
+				_activeHuntedShaderIndex = static_cast<int>(std::distance(_filteredHuntedShaderHashes.begin(), it));
+			}
+			else
+			{
+				_activeHuntedShaderIndex = 0;
+				_activeHuntedShaderHash = _filteredHuntedShaderHashes[0];
+			}
+		}
+	}
+
+
 	void ShaderManager::setActiveHuntedShaderHandle()
 	{
-		if(_activeHuntedShaderIndex < 0 || _collectedActiveShaderHashes.empty() || static_cast<size_t>(_activeHuntedShaderIndex) >= _collectedActiveShaderHashes.size())
+		if(_activeHuntedShaderIndex < 0 || _filteredHuntedShaderHashes.empty() || static_cast<size_t>(_activeHuntedShaderIndex) >= _filteredHuntedShaderHashes.size())
 		{
 			_activeHuntedShaderHash = 0;
 			return;
 		}
 
-		// no lock needed, collecting phase is over
-		auto it = _collectedActiveShaderHashes.begin();
-		std::advance(it, _activeHuntedShaderIndex);
-		_activeHuntedShaderHash = *it;
+		_activeHuntedShaderHash = _filteredHuntedShaderHashes[_activeHuntedShaderIndex];
 	}
 
 
@@ -122,7 +209,7 @@ namespace ShaderToggler
 		{
 			return;
 		}
-		if(_collectedActiveShaderHashes.empty())
+		if(_filteredHuntedShaderHashes.empty())
 		{
 			return;
 		}
@@ -130,55 +217,30 @@ namespace ShaderToggler
 		{
 			if(_markedShaderHashes.empty() || (_markedShaderHashes.size() == 1 && _markedShaderHashes.count(_activeHuntedShaderHash)==1))
 			{
-				// optimization: if the current active shader is part of marked shader hashes and there is
-				// just 1 marked, then we can also stop. We then don't need to do anything so we can return
-				// also if there are no marked shaders, we won't find a next, so return now too.
 				return;
 			}
 
-			// we have marked shaders, find the next one in collected active shader hashes that's part of this set.
-			auto it = _collectedActiveShaderHashes.begin();
-			int index = _activeHuntedShaderIndex + 1;
-			std::advance(it, index);
-			bool foundHash = false;
-			uint32_t hash = 0;
-			while(index!=_activeHuntedShaderIndex)
+			const int total = static_cast<int>(_filteredHuntedShaderHashes.size());
+			int index = (_activeHuntedShaderIndex + 1) % total;
+			while(index != _activeHuntedShaderIndex)
 			{
-				if(it == _collectedActiveShaderHashes.end())
-				{
-					it = _collectedActiveShaderHashes.begin();
-					index = 0;
-				}
-				hash = *it;
+				uint32_t hash = _filteredHuntedShaderHashes[index];
 				if(_markedShaderHashes.count(hash) == 1)
 				{
-					// found one
-					foundHash = true;
+					_activeHuntedShaderIndex = index;
+					_activeHuntedShaderHash = hash;
 					break;
 				}
-				++it;
-				index++;
+				index = (index + 1) % total;
 			}
-			if(foundHash)
-			{
-				_activeHuntedShaderIndex = index;
-				_activeHuntedShaderHash = hash;
-			}
-			// always done
 			return;
 		}
-		if(!_collectedActiveShaderHashes.empty())
+
+		const int total = static_cast<int>(_filteredHuntedShaderHashes.size());
+		_activeHuntedShaderIndex = (_activeHuntedShaderIndex + stepCount) % total;
+		if(_activeHuntedShaderIndex < 0)
 		{
-			const int total = static_cast<int>(_collectedActiveShaderHashes.size());
-			_activeHuntedShaderIndex = (_activeHuntedShaderIndex + stepCount) % total;
-			if(_activeHuntedShaderIndex < 0)
-			{
-				_activeHuntedShaderIndex += total;
-			}
-		}
-		else
-		{
-			_activeHuntedShaderIndex = 0;
+			_activeHuntedShaderIndex += total;
 		}
 		setActiveHuntedShaderHandle();
 	}
@@ -190,7 +252,7 @@ namespace ShaderToggler
 		{
 			return;
 		}
-		if(_collectedActiveShaderHashes.empty())
+		if(_filteredHuntedShaderHashes.empty())
 		{
 			return;
 		}
@@ -198,56 +260,30 @@ namespace ShaderToggler
 		{
 			if(_markedShaderHashes.empty() || (_markedShaderHashes.size() == 1 && _markedShaderHashes.count(_activeHuntedShaderHash) == 1))
 			{
-				// optimization: if the current active shader is part of marked shader hashes and there is
-				// just 1 marked, then we can also stop. We then don't need to do anything so we can return
-				// also if there are no marked shaders, we won't find a next, so return now too.
 				return;
 			}
-			// we have marked shaders, find the next one in collected active shader hashes that's part of this set.
-			auto it = _collectedActiveShaderHashes.begin();
-			int index = _activeHuntedShaderIndex - 1;
-			std::advance(it, index);
-			bool foundHash = false;
-			uint32_t hash = 0;
+
+			const int total = static_cast<int>(_filteredHuntedShaderHashes.size());
+			int index = (_activeHuntedShaderIndex - 1 + total) % total;
 			while(index != _activeHuntedShaderIndex)
 			{
-				if(it == _collectedActiveShaderHashes.begin())
-				{
-					it = _collectedActiveShaderHashes.end();
-					--it;
-					index = static_cast<int>(_collectedActiveShaderHashes.size()) - 1;
-				}
-				hash = *it;
+				uint32_t hash = _filteredHuntedShaderHashes[index];
 				if(_markedShaderHashes.count(hash) == 1)
 				{
-					// found one
-					foundHash = true;
+					_activeHuntedShaderIndex = index;
+					_activeHuntedShaderHash = hash;
 					break;
 				}
-				--it;
-				index--;
+				index = (index - 1 + total) % total;
 			}
-			if(foundHash)
-			{
-				_activeHuntedShaderIndex = index;
-				_activeHuntedShaderHash = hash;
-			}
-			// always done
 			return;
+		}
 
-		}
-		if(!_collectedActiveShaderHashes.empty())
+		const int total = static_cast<int>(_filteredHuntedShaderHashes.size());
+		_activeHuntedShaderIndex = (_activeHuntedShaderIndex - stepCount) % total;
+		if(_activeHuntedShaderIndex < 0)
 		{
-			const int total = static_cast<int>(_collectedActiveShaderHashes.size());
-			_activeHuntedShaderIndex = (_activeHuntedShaderIndex - stepCount) % total;
-			if(_activeHuntedShaderIndex < 0)
-			{
-				_activeHuntedShaderIndex += total;
-			}
-		}
-		else
-		{
-			_activeHuntedShaderIndex = 0;
+			_activeHuntedShaderIndex += total;
 		}
 		setActiveHuntedShaderHandle();
 	}

@@ -90,9 +90,18 @@ namespace ShaderToggler
 		void addActivePipelineHandle(uint64_t handle);
 		void toggleMarkOnHuntedShader();
 
+		void setShaderType(int shaderType) { _shaderType = shaderType; }
+		int getShaderType() const { return _shaderType; }
+
+		void setHeuristicFilter(int categoryFlag);
+		int getHeuristicFilter() const { return _heuristicFilter; }
+		void rebuildFilteredHashes();
+		int getHeuristicCandidateCount(int categoryFlag);
+
 		uint32_t getPipelineCount() { return static_cast<uint32_t>(_handleToShaderHash.size()); }
 		uint32_t getShaderCount() { return static_cast<uint32_t>(_shaderHashes.size()); }
-		uint32_t getAmountShaderHashesCollected() { return static_cast<uint32_t>(_collectedActiveShaderHashes.size()); }
+		uint32_t getAmountShaderHashesCollected();
+		uint32_t getTotalRawHashesCollected();
 		bool isInHuntingMode() { return _isInHuntingMode;}
 		uint32_t getActiveHuntedShaderHash() { return _activeHuntedShaderHash;}
 		int getActiveHuntedShaderIndex() { return _activeHuntedShaderIndex; }
@@ -133,7 +142,10 @@ namespace ShaderToggler
 		std::map<uint64_t, uint32_t> _handleToShaderHash;		// pipeline handle per shader hash. Handle is removed when a pipeline is destroyed.
 		std::unordered_set<uint32_t> _collectedActiveShaderHashes;	// shader hashes bound to pipeline handles which were collected during the collection phase after hunting was enabled, which are the pipeline handles active during the last X frames
 		std::unordered_set<uint32_t> _markedShaderHashes;		// the hashes for shaders which are currently marked.
+		std::vector<uint32_t> _filteredHuntedShaderHashes;		// hashes filtered by heuristic category
 
+		int _shaderType = 0;									// 0 = pixel, 1 = vertex, 2 = compute
+		int _heuristicFilter = 0;								// 0 = Category_All
 		bool _isInHuntingMode = false;
 		int _activeHuntedShaderIndex = -1;
 		uint32_t _activeHuntedShaderHash;

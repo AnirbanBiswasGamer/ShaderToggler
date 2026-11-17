@@ -69,6 +69,21 @@ When editing a toggle group, you can choose from three behavior modes:
 - **Copy Hashes to Clipboard:** Export all shader hashes in the group to the Windows clipboard formatted for easy sharing or manual INI backup.
 - **Add Hash Manually:** Directly add known hex hashes (`0x1A2B3C4D`) to Pixel, Vertex, or Compute slots without having to hunt for them in-game.
 
+### Smart Heuristic Shader Filtering & Auto-Detection
+Instead of manually stepping through 300+ shaders in complex games, ShaderToggler includes a built-in static analysis scanner that automatically classifies collected shaders into visual effect categories:
+- **Outline / Edge Detection Candidates:** Detects Sobel filters, spatial gradient sampling, and inverted-hull normal expansions.
+- **Vignette / Lens Falloff Candidates:** Identifies radial distance calculations from screen centers.
+- **Fog / Atmospheric Depth Candidates:** Identifies exponential depth decays and atmospheric scattering.
+- **Bloom / Blur Filters:** Identifies separable 1D Gaussian kernel accumulations.
+- **UI / HUD Overlays:** Identifies 2D orthographic transforms and alpha-test quads.
+
+Selecting a category instantly narrows your hunting list from hundreds of shaders down to only the 1-3 candidate shaders matching that effect!
+
+### In-Game Shader Dumping (`.cso` & `.asm`)
+While hunting, click **Dump Shader (.cso / .asm)** to instantly export:
+- The compiled binary bytecode: `ShaderDumps/<hash>.cso`
+- The human-readable disassembled assembly: `ShaderDumps/<hash>.asm` (via Windows `d3dcompiler_47.dll`)
+
 ---
 
 ## Configuration Profiles
@@ -79,6 +94,11 @@ When editing a toggle group, you can choose from three behavior modes:
 ---
 
 ## Changelog
+
+### v1.4.0
+- **Smart Heuristic Shader Analyzer:** Automated static analysis engine that classifies shaders by mathematical signature (multi-tap gradient edge detection, radial vignette math, exponential depth fog, separable Gaussian blur, and 2D UI quads).
+- **Candidate Category Filter:** Instantly filters the hunting list down to only matching candidate shaders (e.g. browsing only the 2 detected outline shaders instead of 300+ general shaders).
+- **In-Game Shader Dumper:** 1-click dumping of compiled bytecode (`.cso`) and human-readable disassembled assembly (`.asm`) directly to `ShaderDumps/`.
 
 ### v1.3.1
 - **Flat Hash Cache Architecture:** Aggregated active blocked shader hashes into a consolidated flat set with zero-cost early out, reducing draw call overhead to `O(1)` even in scenes with 5,000+ draw calls per frame.

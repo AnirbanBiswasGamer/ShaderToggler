@@ -37,6 +37,7 @@
 #include <reshade.hpp>
 #include "crc32_hash.hpp"
 #include "ShaderManager.h"
+#include "ShaderAnalyzer.h"
 #include "CDataFile.h"
 #include "ToggleGroup.h"
 #include <vector>
@@ -455,16 +456,28 @@ static void onInitPipeline(device *device, pipeline_layout, uint32_t subobjectCo
 	// shader has been created, we will now create a hash and store it with the handle we got.
 	for (uint32_t i = 0; i < subobjectCount; ++i)
 	{
+		if(subobjects[i].data == nullptr)
+		{
+			continue;
+		}
+
+		const uint32_t shaderHash = calculateShaderHash(subobjects[i].data);
+		const auto shaderDesc = *static_cast<const shader_desc *>(subobjects[i].data);
+		if(shaderHash != 0 && shaderDesc.code != nullptr && shaderDesc.code_size > 0)
+		{
+			ShaderAnalyzer::getInstance().storeBytecode(shaderHash, shaderDesc.code, shaderDesc.code_size);
+		}
+
 		switch (subobjects[i].type)
 		{
 			case pipeline_subobject_type::vertex_shader:
-				g_vertexShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+				g_vertexShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 				break;
 			case pipeline_subobject_type::pixel_shader:
-				g_pixelShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+				g_pixelShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 				break;
 			case pipeline_subobject_type::compute_shader:
-				g_computeShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+				g_computeShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 				break;
 		}
 	}
@@ -492,10 +505,99 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 {
 	if(toDisplay.isInHuntingMode())
 	{
-		ImGui::Text("# of %s shaders active: %d. # of %s shaders in group: %d", shaderType, toDisplay.getAmountShaderHashesCollected(), shaderType, toDisplay.getMarkedShaderCount());
-		const int total = toDisplay.getAmountShaderHashesCollected();
-		const int idx = (total > 0) ? (toDisplay.getActiveHuntedShaderIndex() + 1) : 0;
-		ImGui::Text("Current selected %s shader: %d / %d (Hash: 0x%08X)", shaderType, idx, total, toDisplay.getActiveHuntedShaderHash());
+		const int totalFiltered = toDisplay.getAmountShaderHashesCollected();
+		const int totalRaw = toDisplay.getTotalRawHashesCollected();
+		ImGui::Text("# of %s shaders active: %d (%d candidates). Marked in group: %d", 
+			shaderType, totalRaw, totalFiltered, toDisplay.getMarkedShaderCount());
+
+		// Candidate category filter combo
+		const char* categoryNames[] = {
+			"All Shaders",
+			"Outline / Edge Detection",
+			"Vignette / Lens Falloff",
+			"Fog / Atmospheric Depth",
+			"Bloom / Blur Filters",
+			"UI / HUD / Overlays"
+		};
+		const int categoryValues[] = {
+			Category_All,
+			Category_OutlineEdge,
+			Category_Vignette,
+			Category_FogAtmospheric,
+			Category_BloomBlur,
+			Category_UI_HUD
+		};
+
+		int currentFilter = toDisplay.getHeuristicFilter();
+		int selectedComboIdx = 0;
+		for(int i = 0; i < 6; ++i)
+		{
+			if(categoryValues[i] == currentFilter)
+			{
+				selectedComboIdx = i;
+				break;
+			}
+		}
+
+		char comboLabel[128];
+		int candidateCount = toDisplay.getHeuristicCandidateCount(categoryValues[selectedComboIdx]);
+		sprintf_s(comboLabel, "%s (%d)###FilterCombo%s", categoryNames[selectedComboIdx], candidateCount, shaderType);
+
+		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.70f);
+		if(ImGui::BeginCombo("##HeuristicFilter", comboLabel))
+		{
+			for(int i = 0; i < 6; ++i)
+			{
+				char itemLabel[128];
+				int count = toDisplay.getHeuristicCandidateCount(categoryValues[i]);
+				sprintf_s(itemLabel, "%s (%d)", categoryNames[i], count);
+				bool isSelected = (selectedComboIdx == i);
+				if(ImGui::Selectable(itemLabel, isSelected))
+				{
+					toDisplay.setHeuristicFilter(categoryValues[i]);
+				}
+				if(isSelected)
+				{
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::PopItemWidth();
+
+		const int idx = (totalFiltered > 0) ? (toDisplay.getActiveHuntedShaderIndex() + 1) : 0;
+		const uint32_t currentHash = toDisplay.getActiveHuntedShaderHash();
+		ImGui::Text("Current selected %s shader: %d / %d (Hash: 0x%08X)", shaderType, idx, totalFiltered, currentHash);
+
+		if(currentHash != 0)
+		{
+			std::string desc = ShaderAnalyzer::getInstance().getCategorySummary(currentHash, toDisplay.getShaderType());
+			ImGui::TextColored(ImVec4(0.35f, 0.85f, 1.0f, 1.0f), "Heuristic: %s", desc.c_str());
+
+			ImGui::SameLine();
+			static std::string s_lastDumpMsg = "";
+			static uint32_t s_lastDumpedHash = 0;
+			char dumpBtnLabel[64];
+			sprintf_s(dumpBtnLabel, "Dump (.cso / .asm)##%s", shaderType);
+			if(ImGui::SmallButton(dumpBtnLabel))
+			{
+				std::string csoName, asmName;
+				WCHAR buf[MAX_PATH];
+				GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf));
+				std::filesystem::path basePath = std::filesystem::path(buf).parent_path();
+				if(ShaderAnalyzer::getInstance().dumpShader(currentHash, basePath, csoName, asmName))
+				{
+					s_lastDumpedHash = currentHash;
+					s_lastDumpMsg = "Dumped: " + asmName;
+				}
+			}
+			if(s_lastDumpedHash == currentHash && !s_lastDumpMsg.empty())
+			{
+				ImGui::SameLine();
+				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%s", s_lastDumpMsg.c_str());
+			}
+		}
+
 		if(toDisplay.isHuntedShaderMarked())
 		{
 			displayIsPartOfToggleGroup();
@@ -780,6 +882,12 @@ static void onReshadePresent(effect_runtime* runtime)
 	if(g_activeCollectorFrameCounter>0)
 	{
 		--g_activeCollectorFrameCounter;
+		if(g_activeCollectorFrameCounter == 0)
+		{
+			g_pixelShaderManager.rebuildFilteredHashes();
+			g_vertexShaderManager.rebuildFilteredHashes();
+			g_computeShaderManager.rebuildFilteredHashes();
+		}
 	}
 
 	bool cacheNeedsRebuild = false;
@@ -1554,6 +1662,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
 			reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
 			reshade::register_event<reshade::addon_event::dispatch>(onDispatch);
+			g_pixelShaderManager.setShaderType(0);
+			g_vertexShaderManager.setShaderType(1);
+			g_computeShaderManager.setShaderType(2);
+
 			reshade::register_overlay(nullptr, &displaySettings);
 			initXInput();
 			loadShaderTogglerIniFile();

@@ -18,6 +18,9 @@
     <ClInclude Include="crc32_hash.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderAnalyzer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ShaderManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -39,6 +42,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderAnalyzer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ShaderManager.cpp">
